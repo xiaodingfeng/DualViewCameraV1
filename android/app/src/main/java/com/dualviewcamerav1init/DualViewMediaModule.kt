@@ -51,7 +51,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       }
 
       val upright = applyExifOrientation(decoded, source.absolutePath)
-      val targetAspect = if (variant == "landscape") 16.0 / 9.0 else 3.0 / 4.0
+      val targetAspect = photoAspectForVariant(variant)
       val cropped = centerCrop(upright, targetAspect)
 
       val target = File(
@@ -73,7 +73,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun createVideoVariant(sourcePath: String, variant: String, suffix: String, promise: Promise) {
+  fun createVideoVariant(sourcePath: String, variant: String, suffix: String, targetWidth: Double, targetHeight: Double, promise: Promise) {
     try {
       val source = File(sourcePath.removePrefix("file://"))
       if (!source.exists()) {
@@ -86,7 +86,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
           "DualViewCamera_${safeSuffix(suffix)}_${safeVariant(variant)}_${System.currentTimeMillis()}.mp4"
       )
       
-      val targetSpec = videoTargetSpec(variant)
+      val targetSpec = videoTargetSpec(variant, targetWidth, targetHeight)
       val videoEffects = mutableListOf<Effect>()
       videoEffects.add(
           Presentation.createForWidthAndHeight(
@@ -135,12 +135,24 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
   private data class VideoTargetSpec(val width: Int, val height: Int)
 
-  private fun videoTargetSpec(variant: String): VideoTargetSpec {
-    return if (variant == "landscape") {
+  private fun photoAspectForVariant(variant: String): Double {
+    return when (variant) {
+      "landscape", "video16x9" -> 16.0 / 9.0
+      "square" -> 1.0
+      "photo4x3", "portrait" -> 3.0 / 4.0
+      else -> 3.0 / 4.0
+    }
+  }
+
+  private fun videoTargetSpec(variant: String, targetWidth: Double, targetHeight: Double): VideoTargetSpec {
+    val fallback = if (variant == "landscape" || variant == "video16x9") {
       VideoTargetSpec(1280, 720)
     } else {
       VideoTargetSpec(1080, 1440)
     }
+    val width = targetWidth.roundToInt().coerceAtLeast(1)
+    val height = targetHeight.roundToInt().coerceAtLeast(1)
+    return if (width > 1 && height > 1) VideoTargetSpec(width, height) else fallback
   }
 
   private fun copyFile(source: File, target: File) {
@@ -206,7 +218,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
   private fun safeVariant(value: String): String {
     return when (value) {
-      "portrait", "landscape", "full" -> value
+      "portrait", "landscape", "full", "square", "photo4x3", "video16x9" -> value
       else -> "media"
     }
   }
