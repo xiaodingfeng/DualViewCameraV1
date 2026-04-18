@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Camera UI Spec v2</title>
+<style>
+  :root{
+    --bg:#0f1115;--panel:#171a21;--panel2:#1d2230;--text:#eef2ff;--muted:#98a2b3;--line:rgba(255,255,255,.08);
+    --accent:#f0c040;--green:#2dd4bf;--orange:#ff9f43;--red:#ff5d5d;
+  }
+  *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#0c0f14,#111827 60%,#0b1220);color:var(--text);font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif;}
+  .page{max-width:1420px;margin:0 auto;padding:28px 24px 44px;}
+  .hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;flex-wrap:wrap;margin-bottom:22px;}
+  .hero h1{margin:0 0 10px;font-size:28px;line-height:1.2}
+  .hero p{margin:0;color:var(--muted);max-width:900px;line-height:1.7;font-size:14px}
+  .top-tags{display:flex;gap:8px;flex-wrap:wrap}
+  .tag{padding:8px 10px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.04);font-size:12px;color:#d7deee}
+  .grid{display:grid;grid-template-columns:1.25fr .95fr;gap:18px;align-items:start}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid var(--line);border-radius:24px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.28)}
+  .card h2{margin:0 0 14px;font-size:18px}
+  .sub{font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+  .mode-switch{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .mode-pill{padding:10px 12px;border-radius:12px;background:#111623;border:1px solid var(--line);font-size:12px;color:#dce4f5}
+  .mode-pill strong{display:block;color:#fff;font-size:13px;margin-bottom:3px}
+  .showcase{display:grid;grid-template-columns:repeat(2,minmax(290px,1fr));gap:16px}
+  .scenario{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:20px;padding:14px}
+  .scenario-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px}
+  .scenario-title h3{margin:0;font-size:15px}
+  .scenario-title span{font-size:11px;color:#d6deef;background:rgba(240,192,64,.12);border:1px solid rgba(240,192,64,.35);padding:5px 8px;border-radius:999px;white-space:nowrap}
+  .scenario-note{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.65}
+
+  .device-wrap{display:flex;align-items:flex-start;justify-content:center;position:relative;min-height:420px}
+  .phone{border-radius:32px;overflow:hidden;border:2.5px solid #2a2f3b;background:#111;position:relative;box-shadow:0 0 0 4px #191d27,0 20px 40px rgba(0,0,0,.35)}
+  .portrait{width:210px;height:392px}
+  .landscape{width:392px;height:210px}
+  .notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:64px;height:15px;background:#111;border-radius:0 0 10px 10px;z-index:30}
+  .notch-l{position:absolute;top:0;left:10px;width:10px;height:18px;background:#111;border-radius:0 0 8px 0;z-index:30}
+  .cam{width:100%;height:100%;position:relative;background:#091319;overflow:hidden}
+  .sky{position:absolute;top:0;left:0;right:0;height:45%;background:linear-gradient(180deg,#1f436b,#2f6997)}
+  .ground{position:absolute;left:0;right:0;bottom:0;height:28%;background:linear-gradient(180deg,#2c3e1f,#1e2d14)}
+  .hill{position:absolute;bottom:23%;left:-5%;width:54%;height:20%;background:rgba(36,79,41,.75);filter:blur(.5px);border-radius:50%}
+  .hill.r{left:auto;right:-10%;width:52%;height:18%}
+  .tree{position:absolute;bottom:24%}
+  .tree .top{width:20px;height:28px;background:#2d6a38;border-radius:50% 50% 35% 35%;margin:0 auto}
+  .tree .trunk{width:5px;height:16px;background:#6c4b2d;margin:0 auto}
+  .grid-h,.grid-v{position:absolute;background:rgba(255,255,255,.11)}
+  .grid-h{left:0;right:0;height:.5px}.grid-v{top:0;bottom:0;width:.5px}
+  .focus{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:50px;height:50px;border:1.5px solid rgba(255,205,80,.95)}
+  .focus:before,.focus:after{content:"";position:absolute;width:10px;height:10px;border-color:rgba(255,205,80,.95);border-style:solid}
+  .focus:before{top:-1px;left:-1px;border-width:2px 0 0 2px}.focus:after{right:-1px;bottom:-1px;border-width:0 2px 2px 0}
+  .topbar{position:absolute;left:0;right:0;top:0;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(180deg,rgba(0,0,0,.42),rgba(0,0,0,.12));z-index:10}
+  .bottombar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(180deg,rgba(0,0,0,.04),rgba(0,0,0,.42));z-index:10}
+  .side-tools{position:absolute;right:0;top:0;bottom:0;width:54px;padding:14px 0;display:flex;flex-direction:column;align-items:center;justify-content:space-between;background:rgba(0,0,0,.32);z-index:12}
+  .btn{width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;border:1px solid rgba(255,255,255,.08)}
+  .gallery{width:32px;height:32px;border-radius:8px;background:#315b49;border:1.5px solid rgba(255,255,255,.35)}
+  .shutter{width:48px;height:48px;border-radius:50%;border:3px solid #fff;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center}
+  .shutter i{display:block;width:36px;height:36px;border-radius:50%;background:#fff}
+  .zoom{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:10px;background:rgba(0,0,0,.46);padding:3px 8px;border-radius:999px;z-index:12}
+  .badge-live,.badge-mode,.badge-settings{position:absolute;z-index:16;font-size:9px;letter-spacing:.3px;padding:3px 6px;border-radius:6px}
+  .badge-live{top:6px;left:6px;background:rgba(220,60,60,.92)}
+  .badge-mode{top:12px;left:50%;transform:translateX(-50%);background:rgba(45,212,191,.18);border:1px solid rgba(45,212,191,.42)}
+  .badge-settings{top:44px;right:12px;background:rgba(240,192,64,.14);border:1px solid rgba(240,192,64,.32);color:#ffe1a1}
+
+  .pip-land,.pip-port{position:absolute;overflow:hidden;background:#091319;border:1.5px solid rgba(255,255,255,.45);box-shadow:0 6px 16px rgba(0,0,0,.45);z-index:20}
+  .pip-land{right:10px;bottom:66px;width:108px;height:68px;border-radius:10px}
+  .pip-port{right:64px;bottom:10px;width:56px;height:88px;border-radius:8px}
+  .pip-bottom{position:absolute;right:10px;bottom:10px;width:108px;background:rgba(8,8,8,.84);border:1.5px solid rgba(255,255,255,.45);border-top:none;border-radius:0 0 10px 10px;padding:4px 8px;display:flex;justify-content:space-between;align-items:center;z-index:21}
+  .pip-mini{width:18px;height:18px;border-radius:50%;border:1.5px solid #fff;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.1)}
+  .pip-mini i{display:block;width:12px;height:12px;border-radius:50%;background:#fff}
+  .pip-text{font-size:9px;color:rgba(255,255,255,.8)}
+  .pip-switch{font-size:8px;color:#ffd26b;border:1px solid rgba(240,192,64,.4);background:rgba(240,192,64,.12);padding:2px 4px;border-radius:4px}
+
+  .strip{position:absolute;left:12px;right:12px;bottom:72px;display:flex;gap:6px;z-index:18;justify-content:center;flex-wrap:wrap}
+  .seg{padding:5px 8px;border-radius:999px;font-size:10px;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.32);color:#dfe7f6}
+  .seg.active{background:rgba(240,192,64,.18);border-color:rgba(240,192,64,.42);color:#ffd26b}
+
+  .capture-switch{position:absolute;left:50%;transform:translateX(-50%);bottom:132px;display:flex;gap:6px;z-index:19;padding:4px;background:rgba(0,0,0,.36);border:1px solid rgba(255,255,255,.12);border-radius:999px;backdrop-filter:blur(4px)}
+  .capture-switch.side{left:auto;right:70px;top:50%;bottom:auto;transform:translateY(-50%) rotate(90deg);transform-origin:center}
+  .cap-btn{padding:6px 12px;border-radius:999px;font-size:10px;line-height:1;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.08);color:#dfe7f6;white-space:nowrap}
+  .cap-btn.active{background:rgba(240,192,64,.18);border-color:rgba(240,192,64,.42);color:#ffd26b}
+
+  .legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:16px}
+  .legend .item{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:14px;padding:12px}
+  .legend .item h4{margin:0 0 6px;font-size:13px}
+  .legend .item p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+
+  .settings-panel{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .settings-box{border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.03);padding:14px}
+  .settings-box h3{margin:0 0 8px;font-size:14px}
+  .settings-box p{margin:0 0 10px;font-size:12px;color:var(--muted);line-height:1.6}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{padding:6px 8px;border-radius:999px;font-size:11px;background:#101521;border:1px solid var(--line);color:#d8e0f0}
+  .chip.on{border-color:rgba(45,212,191,.35);background:rgba(45,212,191,.09);color:#c8fff5}
+  .chip.hot{border-color:rgba(240,192,64,.35);background:rgba(240,192,64,.10);color:#ffe3a4}
+
+  .flows{margin-top:16px;border:1px solid var(--line);border-radius:18px;padding:14px;background:rgba(255,255,255,.025)}
+  .flow-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}
+  .step{padding:12px;border-radius:14px;background:#101521;border:1px solid var(--line)}
+  .step .n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(240,192,64,.14);border:1px solid rgba(240,192,64,.35);font-size:11px;color:#ffd26b;margin-bottom:8px}
+  .step h4{margin:0 0 5px;font-size:13px}.step p{margin:0;font-size:12px;color:var(--muted);line-height:1.6}
+
+  .footer-note{margin-top:16px;padding:12px 14px;border-radius:16px;background:rgba(255,159,67,.08);border:1px solid rgba(255,159,67,.2);font-size:12px;line-height:1.7;color:#ffddb9}
+  @media (max-width:1180px){.grid{grid-template-columns:1fr}.showcase{grid-template-columns:1fr 1fr}}
+  @media (max-width:760px){.showcase,.settings-panel,.flow-steps,.legend{grid-template-columns:1fr}.page{padding:18px 14px 36px}.portrait{width:190px;height:360px}.landscape{width:340px;height:184px}}
+</style>
+</head>
+<body>
+<div class="page">
+  <section class="hero">
+    <div>
+      <h1>相机 UI和实现 方案：拍照/录像切换 + 单/双画面切换 + 横竖屏拍摄 + 全量设置入口</h1>
+      <p>本版把需求拆成 4 个明确状态：单画面竖屏、单画面横屏、双画面竖屏、双画面横屏，并在主界面补充“拍照 / 录像”一级切换。这里的双画面特指同一摄像头输出两种方向构图的实时预览，不是双摄。单画面模式允许用户只拍一个画面或单独录像；双画面模式下，主画面与副画面都保持实时取景，并且横竖屏都能各自拍照 / 录像。设置按钮补到主界面顶部，进入后可承接系统相机常用设置项，并支持按设备能力动态显隐。</p>
+    </div>
+    <div class="top-tags">
+      <div class="tag">模式：单画面 / 双画面</div>
+      <div class="tag">方向：横屏 / 竖屏</div>
+      <div class="tag">能力：主副画面拍照 / 录像切换</div>
+      <div class="tag">设置：承接系统 Camera 能力</div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>模式矩阵</h2>
+      <div class="sub">建议把一级入口拆成两层：第一层控制“拍照 / 录像”，第二层控制“单画面 / 双画面”，再由系统姿态或用户手动按钮决定横竖屏呈现。这样规则清晰，避免把“拍摄类型”“单双画面”和“横竖方向”混成一个入口。</div>
+      <div class="mode-switch">
+        <div class="mode-pill"><strong>拍照 / 录像切换</strong>一级常驻入口，拍照与录像共用同一套单/双画面与横竖屏规则。</div>
+        <div class="mode-pill"><strong>单画面模式</strong>只保留一个取景流，支持竖拍或横拍，也支持单独录像。</div>
+        <div class="mode-pill"><strong>双画面模式</strong>同一摄像头下主副画面同时实时预览，两个画面都可独立拍照 / 录像。</div>
+        <div class="mode-pill"><strong>设置入口</strong>顶部齿轮进入参数面板，功能按设备能力映射。</div>
+      </div>
+
+      <div class="showcase">
+        <div class="scenario">
+          <div class="scenario-title"><h3>01. 单画面 · 竖屏拍摄</h3><span>允许只拍单画面</span></div>
+          <div class="device-wrap">
+            <div class="phone portrait">
+              <div class="notch"></div>
+              <div class="cam">
+                <div class="sky"></div><div class="ground"></div><div class="hill"></div><div class="hill r"></div>
+                <div class="tree" style="left:24%"><div class="top"></div><div class="trunk"></div></div>
+                <div class="tree" style="left:57%"><div class="top" style="width:16px;height:22px"></div><div class="trunk" style="height:12px"></div></div>
+                <div class="grid-h" style="top:33%"></div><div class="grid-h" style="top:66%"></div><div class="grid-v" style="left:33%"></div><div class="grid-v" style="left:66%"></div>
+                <div class="focus"></div>
+                <div class="badge-mode">单画面 · 竖屏</div>
+                <div class="badge-settings">⚙ 设置</div>
+                <div class="zoom">1×</div>
+                <div class="topbar"><div class="btn">✕</div><div style="font-size:11px">拍照 / 录像</div><div class="btn">⚡</div></div>
+                <div class="capture-switch"><div class="cap-btn active">拍照</div><div class="cap-btn">录像</div></div>
+                <div class="strip"><div class="seg active">单画面</div><div class="seg">双画面</div><div class="seg active">竖屏</div><div class="seg">横屏</div></div>
+                <div class="bottombar"><div class="gallery"></div><div class="shutter"><i></i></div><div class="btn">↺</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="scenario-note">无副画面，无 PiP，小白用户路径最短。适合普通拍照、文档扫描，也适合作为单画面录像默认首开场景。</div>
+        </div>
+
+        <div class="scenario">
+          <div class="scenario-title"><h3>02. 单画面 · 横屏构图</h3><span>横拍同样可单独工作</span></div>
+          <div class="device-wrap">
+            <div class="phone landscape">
+              <div class="notch-l"></div>
+              <div class="cam">
+                <div class="sky" style="height:42%"></div><div class="ground" style="height:26%"></div><div class="hill"></div><div class="hill r"></div>
+                <div class="tree" style="left:14%"><div class="top"></div><div class="trunk"></div></div>
+                <div class="tree" style="left:35%"><div class="top" style="width:16px;height:22px"></div><div class="trunk" style="height:12px"></div></div>
+                <div class="tree" style="left:58%"><div class="top"></div><div class="trunk"></div></div>
+                <div class="grid-h" style="top:33%"></div><div class="grid-h" style="top:66%"></div><div class="grid-v" style="left:33%"></div><div class="grid-v" style="left:66%"></div>
+                <div class="focus" style="width:44px;height:44px"></div>
+                <div class="badge-mode">单画面 · 横屏</div>
+                <div class="badge-settings" style="right:64px">⚙ 设置</div>
+                <div class="topbar" style="padding-right:62px"><div class="btn">✕</div><div style="font-size:11px">拍照 / 录像</div><div class="btn">⚡</div></div>
+                <div class="capture-switch side"><div class="cap-btn active">拍照</div><div class="cap-btn">录像</div></div>
+                <div class="strip" style="bottom:14px;left:12px;right:68px;justify-content:flex-start"><div class="seg active">单画面</div><div class="seg">双画面</div><div class="seg">竖屏</div><div class="seg active">横屏</div></div>
+                <div class="side-tools"><div class="btn">↺</div><div class="shutter" style="width:40px;height:40px"><i style="width:30px;height:30px"></i></div><div class="gallery" style="width:28px;height:28px"></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="scenario-note">单画面模式下横屏不再出现副画面，避免误解为强制双录。适合视频封面、横向场景、横屏录像与直播前拍摄。</div>
+        </div>
+
+        <div class="scenario">
+          <div class="scenario-title"><h3>03. 同摄双画面 · 竖屏主画面 + 横屏副画面</h3><span>同一摄像头双画面，横竖都拍</span></div>
+          <div class="device-wrap">
+            <div class="phone portrait">
+              <div class="notch"></div>
+              <div class="cam">
+                <div class="sky"></div><div class="ground"></div><div class="hill"></div><div class="hill r"></div>
+                <div class="tree" style="left:22%"><div class="top"></div><div class="trunk"></div></div>
+                <div class="tree" style="left:60%"><div class="top" style="width:16px;height:22px"></div><div class="trunk" style="height:12px"></div></div>
+                <div class="grid-h" style="top:33%"></div><div class="grid-h" style="top:66%"></div><div class="grid-v" style="left:33%"></div><div class="grid-v" style="left:66%"></div>
+                <div class="focus"></div>
+                <div class="badge-mode">同摄双画面 · 主竖副横</div>
+                <div class="badge-settings">⚙ 设置</div>
+                <div class="zoom">1×</div>
+                <div class="topbar"><div class="btn">✕</div><div style="font-size:11px">同摄双画面拍照 / 录像</div><div class="btn">⚡</div></div>
+                <div class="capture-switch"><div class="cap-btn active">拍照</div><div class="cap-btn">录像</div></div>
+                <div class="strip"><div class="seg">单画面</div><div class="seg active">双画面</div><div class="seg active">竖屏主画面</div></div>
+                <div class="bottombar"><div class="gallery"></div><div class="shutter"><i></i></div><div class="btn">↺</div></div>
+                <div class="pip-land">
+                  <div class="sky" style="height:42%"></div><div class="ground" style="height:26%"></div>
+                  <div class="tree" style="left:18%;transform:scale(.72);transform-origin:bottom left"><div class="top"></div><div class="trunk"></div></div>
+                  <div class="tree" style="left:42%;transform:scale(.58);transform-origin:bottom left"><div class="top"></div><div class="trunk"></div></div>
+                  <div class="tree" style="left:68%;transform:scale(.72);transform-origin:bottom left"><div class="top"></div><div class="trunk"></div></div>
+                  <div class="grid-h" style="top:33%"></div><div class="grid-h" style="top:66%"></div><div class="grid-v" style="left:33%"></div><div class="grid-v" style="left:66%"></div>
+                  <div class="focus" style="width:24px;height:24px"></div>
+                  <div class="badge-live">LIVE</div>
+                </div>
+                <div class="pip-bottom"><div class="pip-mini"><i></i></div><div class="pip-text">副画面横拍</div><div class="pip-switch">切主副</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="scenario-note">主画面维持竖屏，右下保留同一摄像头生成的横屏实时副画面。拍照态下主快门拍主画面、副快门拍副画面；录像态下则对应主录制 / 副录制，亦可支持“同源一次双出片”。</div>
+        </div>
+
+        <div class="scenario">
+          <div class="scenario-title"><h3>04. 同摄双画面 · 横屏主画面 + 竖屏副画面</h3><span>同一摄像头横屏下依旧保留双拍</span></div>
+          <div class="device-wrap">
+            <div class="phone landscape">
+              <div class="notch-l"></div>
+              <div class="cam">
+                <div class="sky" style="height:42%"></div><div class="ground" style="height:26%"></div><div class="hill"></div><div class="hill r"></div>
+                <div class="tree" style="left:14%"><div class="top"></div><div class="trunk"></div></div>
+                <div class="tree" style="left:34%"><div class="top" style="width:16px;height:22px"></div><div class="trunk" style="height:12px"></div></div>
+                <div class="tree" style="left:57%"><div class="top"></div><div class="trunk"></div></div>
+                <div class="grid-h" style="top:33%"></div><div class="grid-h" style="top:66%"></div><div class="grid-v" style="left:33%"></div><div class="grid-v" style="left:66%"></div>
+                <div class="focus" style="width:44px;height:44px"></div>
+                <div class="badge-mode">同摄双画面 · 主横副竖</div>
+                <div class="badge-settings" style="right:64px">⚙ 设置</div>
+                <div class="topbar" style="padding-right:62px"><div class="btn">✕</div><div style="font-size:11px">同摄双画面拍照 / 录像</div><div class="btn">⚡</div></div>
+                <div class="capture-switch side"><div class="cap-btn active">拍照</div><div class="cap-btn">录像</div></div>
+                <div class="strip" style="bottom:14px;left:12px;right:68px;justify-content:flex-start"><div class="seg">单画面</div><div class="seg active">双画面</div><div class="seg active">横屏主画面</div></div>
+                <div class="side-tools"><div class="btn">↺</div><div class="shutter" style="width:40px;height:40px"><i style="width:30px;height:30px"></i></div><div class="gallery" style="width:28px;height:28px"></div></div>
+                <div class="pip-port">
+                  <div class="sky"></div><div class="ground" style="height:24%"></div>
+                  <div class="tree" style="left:28%;transform:scale(.55);transform-origin:bottom left"><div class="top"></div><div class="trunk"></div></div>
+                  <div class="badge-live">LIVE</div>
+                </div>
+                <div style="position:absolute;right:64px;bottom:10px;width:56px;background:rgba(8,8,8,.84);border:1.5px solid rgba(255,255,255,.45);border-top:none;border-radius:0 0 8px 8px;padding:3px 0;display:flex;justify-content:center;z-index:21"><span class="pip-switch">副画面可拍</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="scenario-note">横屏进入全屏后，仍保留同一摄像头生成的竖屏副画面预览与拍摄能力，满足“双画面实时横竖屏都可拍照 / 录像”的目标。</div>
+        </div>
+      </div>
+
+      <div class="legend">
+        <div class="item"><h4>拍照 / 录像切换</h4><p>一级常驻入口，切换后只改变输出类型，不改变当前单/双画面与横竖屏状态。</p></div>
+        <div class="item"><h4>主快门 / 主录制</h4><p>始终对应当前主画面输出；拍照保存静态图，录像进入录制态并按主视图比例保存。</p></div>
+        <div class="item"><h4>副快门 / 副录制</h4><p>只在双画面模式出现，对应副视图构图；录像态下可定义为单独录副画面或主副同时录制。</p></div>
+        <div class="item"><h4>切主副</h4><p>双画面模式下允许交换主副画面，不改变同一摄像头下两种构图的方向能力。</p></div>
+        <div class="item"><h4>设置按钮</h4><p>放在顶部强可见位置，进入独立设置面板，避免埋在二级菜单里。</p></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>设置按钮与参数面板</h2>
+      <div class="sub">“允许设置系统相机设置所有的功能”在产品上更稳妥的表达通常是：<strong>承接系统相机可开放的全部能力，并按设备能力动态展示</strong>。同时新增“拍照 / 录像”对应的录制参数入口。不同机型不一定真的支持全部参数，所以 UI 需要做能力探测、可用态、禁用态和默认值管理。</div>
+
+      <div class="settings-panel">
+        <div class="settings-box">
+          <h3>基础拍摄</h3>
+          <p>首屏最常用、最接近系统相机的控制项，同时覆盖拍照与录像的基础开关。</p>
+          <div class="chips">
+            <div class="chip on">闪光灯：关 / 开 / 自动</div>
+            <div class="chip on">定时：3s / 5s / 10s</div>
+            <div class="chip on">网格线</div>
+            <div class="chip on">HDR / 智能优化</div>
+            <div class="chip on">拍照比例 4:3 / 1:1 / 16:9</div>
+            <div class="chip on">分辨率</div>
+            <div class="chip hot">拍照 / 录像切换</div>
+            <div class="chip on">视频清晰度 720p / 1080p / 4K</div>
+            <div class="chip on">帧率 24 / 30 / 60fps</div>
+          </div>
+        </div>
+
+        <div class="settings-box">
+          <h3>对焦与曝光</h3>
+          <p>适合稍高级用户，也适合作为系统能力映射区。</p>
+          <div class="chips">
+            <div class="chip on">自动对焦 / 手动对焦</div>
+            <div class="chip on">曝光补偿 EV</div>
+            <div class="chip on">ISO</div>
+            <div class="chip on">快门速度</div>
+            <div class="chip on">白平衡 WB</div>
+            <div class="chip on">测光模式</div>
+          </div>
+        </div>
+
+        <div class="settings-box">
+          <h3>镜头与画质</h3>
+          <p>需要根据设备镜头组合动态展示。</p>
+          <div class="chips">
+            <div class="chip hot">0.5× / 1× / 2× / 长焦</div>
+            <div class="chip on">超广角畸变矫正</div>
+            <div class="chip on">防抖 / 稳定</div>
+            <div class="chip on">RAW / JPEG / HEIF</div>
+            <div class="chip on">水印 / 时间地点</div>
+            <div class="chip on">保存质量</div>
+          </div>
+        </div>
+
+        <div class="settings-box">
+          <h3>双画面专属</h3>
+          <p>这是本需求新增的关键设置，建议和系统设置并列。</p>
+          <div class="chips">
+            <div class="chip hot">默认模式：单画面 / 同摄双画面</div>
+            <div class="chip hot">默认主画面方向：竖 / 横</div>
+            <div class="chip hot">副画面位置：右下 / 左下 / 浮窗拖拽</div>
+            <div class="chip hot">副画面比例</div>
+            <div class="chip hot">主副是否同时保存 / 同时录制</div>
+            <div class="chip hot">点击切换主副画面</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flows">
+        <h3 style="margin:0;font-size:15px">建议交互流（补充拍照 / 录像切换）</h3>
+        <div class="flow-steps">
+          <div class="step"><div class="n">1</div><h4>默认进入拍照 · 单画面</h4><p>降低首次学习成本，首开即能拍照；上方常驻切换可一键进入录像。</p></div>
+          <div class="step"><div class="n">2</div><h4>点击切到录像或双画面</h4><p>先切换拍照 / 录像，再决定是否进入双画面；双画面下出现副画面与对应录制能力。</p></div>
+          <div class="step"><div class="n">3</div><h4>横竖屏自动适配</h4><p>竖屏时主竖副横；横屏时主横副竖，也允许手动交换；拍照与录像两态都共用这套规则。</p></div>
+          <div class="step"><div class="n">4</div><h4>齿轮进入完整设置</h4><p>按设备能力展示系统相机可用功能、录像参数，以及同摄双画面扩展项。</p></div>
+        </div>
+      </div>
+
+      <div class="footer-note">
+        实现层建议：<br>
+        1. 单画面模式只维持一个预览 Surface / Texture，减少功耗与发热。<br>
+        2. 双画面模式主副都来自同一摄像头，建议共享同一 Camera session 与同源预览纹理，再分别做横竖构图与裁剪。<br>
+        3. 设置页不要写死“全部可用”，应按 Camera 能力探测返回结果动态展示，否则会和真实设备能力冲突。<br>
+        4. 双画面拍摄建议定义清楚：拍照态下主快门拍主图、副快门拍副图；录像态下主录制 / 副录制 / 同时录制的规则也应单独开关。
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- 技术可行性分析 -->
+<div style="max-width:960px;margin:0 auto 24px;padding:0 1rem;">
+  <div style="background:var(--color-background-secondary);border:1px solid var(--color-border-secondary);border-radius:14px;padding:18px 18px 14px;">
+    <div style="font-size:18px;font-weight:700;color:var(--color-text-primary);margin-bottom:10px;">技术可行性分析（基于当前版本：单摄像头 + 拍照/录像切换 + 横竖双画面）</div>
+    <div style="font-size:13px;line-height:1.8;color:var(--color-text-primary);margin-bottom:12px;">
+      当前方案已经明确限定为：<b>双画面仅指同一摄像头的同源预览复用</b>，不是双摄、不是前后同开；同时新增拍照 / 录像一级切换。其技术模型可抽象为：
+    </div>
+    <div style="background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:10px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.8;color:var(--color-text-primary);white-space:pre-wrap;margin-bottom:14px;">Camera（单一流）
+  ↓
+共享帧 / GPU Buffer
+  ↓
+渲染层
+  ├─ 主画面（当前方向）
+  ├─ 副画面（另一方向）
+  ↓
+输出层
+  ├─ 拍照：横图 16:9 / 竖图 9:16 / 方图 1:1
+  └─ 录像：横视频 16:9 / 竖视频 9:16</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+      <div style="background:var(--color-background-primary);border-radius:10px;padding:12px 14px;border:1px solid var(--color-border-secondary);">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">可行性结论</div>
+        <div style="font-size:12px;line-height:1.8;color:var(--color-text-secondary);">
+          该方案在 Android、iOS、鸿蒙上均具备工程可行性。核心不是“双流拍摄”，而是<b>单流多视图 + 多比例裁剪 / 录制编排</b>。主副画面只是在 UI 层切换展示权重，不需要切换摄像头；拍照与录像共用同一预览链路。
+        </div>
+      </div>
+      <div style="background:var(--color-background-primary);border-radius:10px;padding:12px 14px;border:1px solid var(--color-border-secondary);">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">推荐实现原则</div>
+        <div style="font-size:12px;line-height:1.8;color:var(--color-text-secondary);">
+          底层尽量保留更大的原始画幅（优先 4:3 或 full sensor frame），在预览层实时生成横图 16:9、竖图 9:16 与方图 1:1 的构图框；拍照时由同一帧统一裁剪输出，录像时复用同一预览链路进入对应编码与保存流程。
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:15px;font-weight:700;color:var(--color-text-primary);margin:4px 0 10px;">平台评估</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+      <div style="background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">Android</div>
+        <div style="font-size:12px;line-height:1.8;color:var(--color-text-secondary);">
+          Camera2 / CameraX 可稳定支持单摄像头预览流复用。可通过 SurfaceTexture、TextureView 或 OpenGL 进行主副画面渲染。实现成本最低，最适合作为首发平台。
+        </div>
+      </div>
+      <div style="background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">iOS</div>
+        <div style="font-size:12px;line-height:1.8;color:var(--color-text-secondary);">
+          基于 AVFoundation 可行，但更推荐使用 AVCaptureVideoDataOutput + Metal / CoreImage 做双画面自绘。不能依赖系统相机 UI，需要自定义渲染与构图逻辑。
+        </div>
+      </div>
+      <div style="background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:10px;padding:12px 14px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">鸿蒙</div>
+        <div style="font-size:12px;line-height:1.8;color:var(--color-text-secondary);">
+          基于 Camera Kit 可实现同一摄像头的多视图预览与裁剪输出，整体实现思路接近 Android，但具体可调参数与性能表现更依赖设备能力。
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:15px;font-weight:700;color:var(--color-text-primary);margin:4px 0 10px;">关键问题：竖屏 9:16 为什么左右会“漏很多”</div>
+    <div style="background:rgba(234,139,15,0.08);border:1px solid rgba(234,139,15,0.35);border-radius:10px;padding:12px 14px;margin-bottom:12px;">
+      <div style="font-size:12px;line-height:1.9;color:var(--color-text-primary);">
+        这是由<b>纵横比差异</b>决定的正常现象，并非相机异常。横屏 16:9 是宽画幅，竖屏 9:16 是窄画幅；在同一张原始画面中，竖屏要成立，就必须裁掉更多左右区域。因此问题不在于“如何不裁”，而在于<b>如何让用户提前看见裁切边界，并尽量减少信息损失</b>。
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+      <div style="background:var(--color-background-primary);border-radius:10px;padding:12px 14px;border:1px solid var(--color-border-secondary);">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">推荐解决策略</div>
+        <div style="font-size:12px;line-height:1.85;color:var(--color-text-secondary);">
+          1）底层保留更大源图，不要只保留已经裁成 16:9 的预览流。<br>
+          2）竖拍时显示真实 9:16 成片框，并对左右非成片区做轻遮罩。<br>
+          3）保留横图小窗，让用户同时感知横向完整构图。<br>
+          4）拍照后基于同一张原始图统一裁出横图 / 竖图 / 方图，保证曝光与时间戳一致。
+        </div>
+      </div>
+      <div style="background:var(--color-background-primary);border-radius:10px;padding:12px 14px;border:1px solid var(--color-border-secondary);">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">不建议的方案</div>
+        <div style="font-size:12px;line-height:1.85;color:var(--color-text-secondary);">
+          1）不要尝试用两个独立拍照流分别产出横图和竖图。<br>
+          2）不要把竖图硬拉到和横图一样宽，这会造成畸变。<br>
+          3）不要在拍完后才告知用户被裁切，构图边界必须在预览时就可见。
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:15px;font-weight:700;color:var(--color-text-primary);margin:4px 0 10px;">关于 1:1（16:16）方图</div>
+    <div style="font-size:12px;line-height:1.9;color:var(--color-text-secondary);margin-bottom:0;">
+      如果底层保留的是更大的原始画面（例如 4:3），则同一张图可以同时裁出 <b>16:9 / 9:16 / 1:1</b> 三种比例。工程上应直接将“16:16”定义为 <b>1:1 方图</b>，并与横图、竖图共享同一套裁剪链路。
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

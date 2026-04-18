@@ -1,0 +1,27 @@
+# Gemini Ignore File
+# This file tells Gemini CLI which files to ignore when searching or reading.
+
+node_modules/
+.git/
+build/
+.gradle/
+.idea/
+.kotlin/
+.cxx/
+android/app/build/
+ios/build/
+ios/Pods/
+ios/DerivedData/
+*.jsbundle
+tmp_media/
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.exe
+*.apk
+*.keystore
+package-lock.json
+Gemfile.lock
+.bundle/
+/_rn085_template/

@@ -73,3 +73,29 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Local upgrade/build scratch files
+/_rn085_template/
+/gradle-build.log
+/tmp_media/
+
+# Local dev runtime logs and screenshots
+/metro.log
+/metro.err.log
+/device-*.png
+
+# Ruby / Bundler
+.bundle/
+
+# Editor / IDE
+.vscode/
+.history/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Windows
+Thumbs.db
+Desktop.ini
