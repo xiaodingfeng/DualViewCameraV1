@@ -234,7 +234,7 @@ function CameraShell({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveDualOutputs, setSaveDualOutputs] = useState(true);
   
-  const [zoom, setZoom] = useState(device.minZoom);
+  const [zoom, setZoom] = useState(() => clamp(1, device.minZoom, device.maxZoom));
   const [isRulerMode, setIsRulerMode] = useState(false);
   
   const [isBusy, setIsBusy] = useState(false);
@@ -403,7 +403,7 @@ function CameraShell({
 
   useEffect(() => {
     if (!device) return;
-    setZoom(device.minZoom);
+    setZoom(clamp(1, device.minZoom, device.maxZoom));
     setFlashMode('off');
     setIsSwapped(false);
     setIsRulerMode(false);
@@ -412,6 +412,12 @@ function CameraShell({
       setVideoFps(30);
     }
   }, [device?.id]);
+
+  useEffect(() => {
+    if (captureMode === 'video') {
+      setFlashMode('off');
+    }
+  }, [captureMode]);
 
   useEffect(() => {
     if (!isRecording || recordingStartedAt == null) {
@@ -474,6 +480,12 @@ function CameraShell({
     if (cameraController == null || typeof (cameraController as any).setZoom !== 'function') return;
     (cameraController as any).setZoom(clamp(zoom, device.minZoom, device.maxZoom)).catch(() => {});
   }, [cameraController, zoom, device.minZoom, device.maxZoom]);
+
+  useEffect(() => {
+    if (cameraController == null || typeof (cameraController as any).setTorchMode !== 'function') return;
+    const shouldEnableTorch = captureMode === 'video' && flashMode === 'on' && device.hasTorch;
+    (cameraController as any).setTorchMode(shouldEnableTorch ? 'on' : 'off', shouldEnableTorch ? 1 : undefined).catch(() => {});
+  }, [cameraController, captureMode, device.hasTorch, flashMode]);
 
   useEffect(() => {
     if (cameraController == null || previewRef.current == null || previewSize.width <= 0 || previewSize.height <= 0) {
@@ -653,8 +665,16 @@ function CameraShell({
       setToast('不支持闪光灯');
       return;
     }
+    if (captureMode === 'video') {
+      if (!device?.hasTorch) {
+        setToast('不支持常亮闪光灯');
+        return;
+      }
+      setFlashMode(current => (current === 'on' ? 'off' : 'on'));
+      return;
+    }
     setFlashMode(current => (current === 'off' ? 'auto' : current === 'auto' ? 'on' : 'off'));
-  }, [device?.hasFlash, device?.hasTorch]);
+  }, [captureMode, device?.hasFlash, device?.hasTorch]);
 
   const swapMainAndSub = useCallback(() => {
     setIsSwapped(current => !current);
@@ -741,7 +761,7 @@ function CameraShell({
             />
           )}
           {toast ? <Toast message={toast} /> : null}
-          <View style={styles.zoomBarContainer}>
+          <View style={styles.zoomBarContainer} pointerEvents="box-none">
              <ZoomSelector 
                currentZoom={zoom} 
                onChange={setZoom} 
@@ -890,7 +910,7 @@ function TopBar({
 
 function BottomControls({ captureMode, isBusy, isRecording, lastMedia, onCaptureModeChange, onGalleryPress, onPrimaryAction, onSwitchCamera, onViewModeChange, viewMode }: { captureMode: CaptureMode; isBusy: boolean; isRecording: boolean; lastMedia: LastMedia; onCaptureModeChange: (mode: CaptureMode) => void; onGalleryPress: () => void; onPrimaryAction: () => void; onSwitchCamera: () => void; onViewModeChange: (mode: ViewMode) => void; viewMode: ViewMode }) {
   return (
-    <View style={styles.bottomControls}>
+    <View style={styles.bottomControls} pointerEvents="box-none">
       <View style={styles.modeRow}>
         <Text onPress={() => onCaptureModeChange('photo')} style={[styles.modeText, captureMode === 'photo' && styles.modeTextActive]}>拍照</Text>
         <Text onPress={() => onCaptureModeChange('video')} style={[styles.modeText, captureMode === 'video' && styles.modeTextActive]}>录像</Text>
@@ -995,7 +1015,8 @@ function ZoomSelector({ currentZoom, onChange, minZoom, maxZoom, isRulerMode, se
     onPanResponderTerminate: () => setIsRulerMode(false)
   })).current;
 
-  const stripLeft = (ZOOM_BAR_WIDTH / 2) - (currentZoom - minZoom) * PX_PER_ZOOM;
+  const tickStep = PX_PER_ZOOM * 0.1;
+  const stripLeft = (ZOOM_BAR_WIDTH / 2) - ((currentZoom - minZoom) * PX_PER_ZOOM) - (tickStep / 2);
   const markers = useMemo(() => {
      const items = [];
      for(let i=0; i <= (maxZoom - minZoom) * 10; i++) items.push(minZoom + i * 0.1);
@@ -1008,7 +1029,7 @@ function ZoomSelector({ currentZoom, onChange, minZoom, maxZoom, isRulerMode, se
         <View style={styles.rulerContainer}>
            <View style={[styles.rulerStrip, { left: stripLeft }]}>
               {markers.map((val) => (
-                <View key={val.toFixed(1)} style={[styles.markerGroup, { width: PX_PER_ZOOM * 0.1 }]}>
+                <View key={val.toFixed(1)} style={[styles.markerGroup, { width: tickStep }]}>
                    <View style={[styles.tick, Math.abs(val % 0.5) < 0.01 && styles.tickHalf, Math.abs(val % 1) < 0.01 && styles.tickMajor]} />
                    {Math.abs(val % 1) < 0.01 && <Text style={styles.tickLabel}>{val.toFixed(0)}</Text>}
                 </View>
@@ -1077,8 +1098,8 @@ function SettingsModal({
   const [tab, setTab] = useState<SettingsTab>('photo');
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
-      <View style={styles.modalShade}>
-        <View style={styles.settingsPanel}>
+      <Pressable style={styles.modalShade} onPress={onClose}>
+        <View style={styles.settingsPanel} onStartShouldSetResponder={() => true}>
           <View style={styles.settingsHeader}>
             <Text style={styles.settingsTitle}>设置</Text>
             <Pressable onPress={onClose}><Text style={styles.closeText}>完成</Text></Pressable>
@@ -1129,7 +1150,7 @@ function SettingsModal({
             </SettingsSection>
           </ScrollView>
         </View>
-      </View>
+      </Pressable>
     </Modal>
   );
 }
@@ -1274,28 +1295,28 @@ const styles = StyleSheet.create({
   roundButtonActive: { backgroundColor: 'rgba(255,209,102,0.18)', opacity: 0.88 },
   roundButtonText: { color: COLORS.text, fontSize: 14, fontWeight: '800' },
   noBorderButton: { backgroundColor: 'transparent', borderWidth: 0, minWidth: 42 },
-  pip: { position: 'absolute', left: 18, bottom: 164, zIndex: 18, overflow: 'hidden', borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: '#000' },
+  pip: { position: 'absolute', left: 18, bottom: 228, zIndex: 18, overflow: 'hidden', borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: '#000' },
   pipLandscape: { width: 190, height: 110, borderRadius: 16 },
   pipPortrait: { width: 126, height: 168, borderRadius: 16 },
   pipLabel: { position: 'absolute', left: 6, bottom: 5, color: COLORS.text, fontSize: 10, fontWeight: '800', textShadowColor: '#000', textShadowRadius: 3 },
   pipTouchLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 2 },
   pipPlaceholder: { flex: 1, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
   pipPlaceholderText: { color: COLORS.muted, fontSize: 12, fontWeight: '800' },
-  zoomBarContainer: { position: 'absolute', left: 0, right: 0, bottom: 176, alignItems: 'center', zIndex: 25 },
-  zoomBarShell: { width: ZOOM_BAR_WIDTH, height: 50, backgroundColor: 'rgba(0,0,0,0.26)', borderRadius: 25, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  zoomBarContainer: { position: 'absolute', left: 0, right: 0, bottom: 180, alignItems: 'center', zIndex: 25 },
+  zoomBarShell: { width: ZOOM_BAR_WIDTH, height: 38, backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 19, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   optionsRow: { flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'space-evenly' },
   optionItem: { height: '100%', paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
   optionText: { color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '900' },
   activeText: { color: COLORS.accent },
   rulerContainer: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
-  rulerStrip: { position: 'absolute', flexDirection: 'row', alignItems: 'flex-end', height: '100%', paddingBottom: 10 },
+  rulerStrip: { position: 'absolute', flexDirection: 'row', alignItems: 'flex-end', height: '100%', paddingBottom: 7 },
   markerGroup: { alignItems: 'center' },
-  tick: { width: 1.5, height: 8, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 1 },
-  tickHalf: { height: 12, backgroundColor: 'rgba(255,255,255,0.5)' },
-  tickMajor: { height: 18, backgroundColor: '#fff', width: 2 },
-  tickLabel: { position: 'absolute', top: -16, color: 'rgba(255,255,255,0.6)', fontSize: 9, fontWeight: '800' },
-  centerPointer: { position: 'absolute', width: 2.5, height: 26, backgroundColor: COLORS.accent, borderRadius: 2, zIndex: 3 },
-  valueFloat: { position: 'absolute', right: 14, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 6, borderRadius: 10 },
+  tick: { width: 1.5, height: 7, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 1 },
+  tickHalf: { height: 10, backgroundColor: 'rgba(255,255,255,0.5)' },
+  tickMajor: { height: 15, backgroundColor: '#fff', width: 2 },
+  tickLabel: { position: 'absolute', top: -13, color: 'rgba(255,255,255,0.6)', fontSize: 8, fontWeight: '800' },
+  centerPointer: { position: 'absolute', width: 2.5, height: 22, backgroundColor: COLORS.accent, borderRadius: 2, zIndex: 3 },
+  valueFloat: { position: 'absolute', right: 12, backgroundColor: 'rgba(0,0,0,0.28)', paddingHorizontal: 6, borderRadius: 10 },
   floatingValue: { color: COLORS.accent, fontSize: 13, fontWeight: '900' },
   toast: { position: 'absolute', left: 24, right: 24, bottom: 150, zIndex: 30, alignItems: 'center' },
   toastText: { overflow: 'hidden', color: COLORS.text, fontSize: 13, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.65)' },
