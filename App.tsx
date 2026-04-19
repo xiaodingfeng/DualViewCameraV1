@@ -109,10 +109,10 @@ const ASPECT_RATIOS: Array<{ id: AspectRatioId; label: string; previewAspect?: n
   { id: '16:9', label: '16:9', previewAspect: 9 / 16, photoVariant: 'video16x9', photoResolution: CommonResolutions.UHD_16_9 },
 ];
 
-const PHOTO_QUALITY_CONFIG: Record<PhotoQuality, { label: string; quality: number; priority: 'speed' | 'balanced' | 'quality' }> = {
-  high: { label: '高', quality: 0.96, priority: 'quality' },
-  standard: { label: '标准', quality: 0.88, priority: 'balanced' },
-  low: { label: '低', quality: 0.72, priority: 'speed' },
+const PHOTO_QUALITY_CONFIG: Record<PhotoQuality, { label: string; quality: number; nativeQuality: number; priority: 'speed' | 'balanced' | 'quality' }> = {
+  high: { label: '高', quality: 1, nativeQuality: 99, priority: 'quality' },
+  standard: { label: '标准', quality: 0.92, nativeQuality: 94, priority: 'balanced' },
+  low: { label: '低', quality: 0.78, nativeQuality: 82, priority: 'speed' },
 };
 
 const PHOTO_FORMAT_CONFIG: Record<PhotoFormat, { label: string }> = {
@@ -137,6 +137,7 @@ const { DualViewMedia } = NativeModules as {
     createPhotoVariant(sourcePath: string, variant: PhotoVariant, suffix: string): Promise<string>;
     createPhotoVariantWithAspect?(sourcePath: string, suffix: string, aspectWidth: number, aspectHeight: number): Promise<string>;
     createPhotoVariantWithAspectAndFormat?(sourcePath: string, suffix: string, aspectWidth: number, aspectHeight: number, format: PhotoFormat): Promise<string>;
+    createPhotoVariantWithAspectFormatQuality?(sourcePath: string, suffix: string, aspectWidth: number, aspectHeight: number, format: PhotoFormat, quality: number): Promise<string>;
     getMediaStoragePath?(uri: string): Promise<string>;
     createDualPhotoVariantsWithAspects?(
       sourcePath: string,
@@ -156,6 +157,17 @@ const { DualViewMedia } = NativeModules as {
       subAspectWidth: number,
       subAspectHeight: number,
       format: PhotoFormat,
+    ): Promise<{ mainPath: string; subPath: string }>;
+    createDualPhotoVariantsWithAspectsFormatQuality?(
+      sourcePath: string,
+      mainSuffix: string,
+      mainAspectWidth: number,
+      mainAspectHeight: number,
+      subSuffix: string,
+      subAspectWidth: number,
+      subAspectHeight: number,
+      format: PhotoFormat,
+      quality: number,
     ): Promise<{ mainPath: string; subPath: string }>;
     createVideoVariant?(sourcePath: string, variant: PhotoVariant, suffix: string, width: number, height: number, codec: VideoCodecFormat): Promise<string>;
     shareMedia?(uri: string, mimeType: string, title: string): Promise<boolean>;
@@ -263,7 +275,7 @@ function CameraShell({
   const mainPreviewOutput = usePreviewOutput();
   const pipPreviewOutput = usePreviewOutput();
   const photoOutput = usePhotoOutput({
-    targetResolution: CommonResolutions.UHD_4_3,
+    targetResolution: photoQuality === 'high' ? CommonResolutions.HIGHEST_4_3 : CommonResolutions.UHD_4_3,
     containerFormat: 'jpeg',
     quality: photoQualityConfig.quality,
     qualityPrioritization: photoQualityConfig.priority === 'speed' && !device.supportsSpeedQualityPrioritization
@@ -621,17 +633,17 @@ function CameraShell({
     return saved.node.image.uri;
   }, [refreshGallery]);
 
-  const saveCapturedPhotoInBackground = useCallback((filePath: string, options: { mainSpec: VisibleFrameSpec; subSpec: VisibleFrameSpec; dual: boolean; format: PhotoFormat }) => {
+  const saveCapturedPhotoInBackground = useCallback((filePath: string, options: { mainSpec: VisibleFrameSpec; subSpec: VisibleFrameSpec; dual: boolean; format: PhotoFormat; quality: number }) => {
     void (async () => {
       try {
         if (options.dual) {
-          const { mainPath, subPath } = await createDualPhotoVariantsForAspects(filePath, options.mainSpec, options.subSpec, options.format);
+          const { mainPath, subPath } = await createDualPhotoVariantsForAspects(filePath, options.mainSpec, options.subSpec, options.format, options.quality);
           await Promise.all([
             saveToGallery(mainPath, 'photo', '主画面'),
             saveToGallery(subPath, 'photo', '副画面'),
           ]);
         } else {
-          const mainPath = await createPhotoVariantForAspect(filePath, options.mainSpec, 'main', options.format);
+          const mainPath = await createPhotoVariantForAspect(filePath, options.mainSpec, 'main', options.format, options.quality);
           await saveToGallery(mainPath, 'photo', '主画面');
         }
       } catch (error) {
@@ -672,6 +684,7 @@ function CameraShell({
         subSpec: subFrameSpec,
         dual: viewMode === 'dual' && saveDualOutputs,
         format: photoFormat,
+        quality: photoQualityConfig.nativeQuality,
       });
     } catch (error) {
       setToast(cameraErrorMessage(error, '拍照失败'));
@@ -680,7 +693,7 @@ function CameraShell({
       setIsBusy(false);
       setPendingPhotoCapture(false);
     }
-  }, [captureMode, cleanupFlashAfterPhoto, device?.hasFlash, flashMode, isBusy, mainFrameSpec, pendingPhotoCapture, photoFormat, photoOutput, prepareFlashForPhoto, saveCapturedPhotoInBackground, saveDualOutputs, subFrameSpec, viewMode]);
+  }, [captureMode, cleanupFlashAfterPhoto, device?.hasFlash, flashMode, isBusy, mainFrameSpec, pendingPhotoCapture, photoFormat, photoOutput, photoQualityConfig.nativeQuality, prepareFlashForPhoto, saveCapturedPhotoInBackground, saveDualOutputs, subFrameSpec, viewMode]);
 
   useEffect(() => {
     if (!pendingPhotoCapture) return;
@@ -1614,7 +1627,17 @@ async function createPhotoVariant(filePath: string, variant: PhotoVariant, suffi
   if (variant === 'full' || !DualViewMedia?.createPhotoVariant) return toLocalPath(filePath);
   return DualViewMedia.createPhotoVariant(toLocalPath(filePath), variant, slugify(suffix));
 }
-async function createPhotoVariantForAspect(filePath: string, spec: VisibleFrameSpec, suffix: string, format: PhotoFormat = 'jpeg'): Promise<string> {
+async function createPhotoVariantForAspect(filePath: string, spec: VisibleFrameSpec, suffix: string, format: PhotoFormat = 'jpeg', quality = 94): Promise<string> {
+  if (DualViewMedia?.createPhotoVariantWithAspectFormatQuality) {
+    return DualViewMedia.createPhotoVariantWithAspectFormatQuality(
+      toLocalPath(filePath),
+      slugify(`${suffix}_${spec.variant}`),
+      Math.round(spec.aspect * 10000),
+      10000,
+      format,
+      quality,
+    );
+  }
   if (DualViewMedia?.createPhotoVariantWithAspectAndFormat) {
     return DualViewMedia.createPhotoVariantWithAspectAndFormat(
       toLocalPath(filePath),
@@ -1634,7 +1657,20 @@ async function createPhotoVariantForAspect(filePath: string, spec: VisibleFrameS
   }
   return createPhotoVariant(filePath, spec.variant, suffix);
 }
-async function createDualPhotoVariantsForAspects(filePath: string, mainSpec: VisibleFrameSpec, subSpec: VisibleFrameSpec, format: PhotoFormat = 'jpeg'): Promise<{ mainPath: string; subPath: string }> {
+async function createDualPhotoVariantsForAspects(filePath: string, mainSpec: VisibleFrameSpec, subSpec: VisibleFrameSpec, format: PhotoFormat = 'jpeg', quality = 94): Promise<{ mainPath: string; subPath: string }> {
+  if (DualViewMedia?.createDualPhotoVariantsWithAspectsFormatQuality) {
+    return DualViewMedia.createDualPhotoVariantsWithAspectsFormatQuality(
+      toLocalPath(filePath),
+      slugify(`main_${mainSpec.variant}`),
+      Math.round(mainSpec.aspect * 10000),
+      10000,
+      slugify(`sub_${subSpec.variant}`),
+      Math.round(subSpec.aspect * 10000),
+      10000,
+      format,
+      quality,
+    );
+  }
   if (DualViewMedia?.createDualPhotoVariantsWithAspectsAndFormat) {
     return DualViewMedia.createDualPhotoVariantsWithAspectsAndFormat(
       toLocalPath(filePath),
