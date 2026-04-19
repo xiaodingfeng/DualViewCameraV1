@@ -223,10 +223,7 @@ function App(): React.JSX.Element {
   }
 
   if (device == null) {
-    if (isInitializing) {
-      return <View style={styles.root} />;
-    }
-    return <EmptyCameraScreen position={cameraPosition} onSwitchCamera={switchCamera} />;
+    return <View style={styles.root} />;
   }
 
   const dCount = Array.isArray(devicesList) ? devicesList.length : 0;
@@ -1566,7 +1563,7 @@ function MainPreview({
         {isTransitioning && (
           <View style={[StyleSheet.absoluteFill, styles.transitionOverlay]}>
              <View style={styles.transitionLogo}>
-                <Text style={styles.transitionLogoText}>Agile Studio</Text>
+                <Text style={styles.transitionLogoText}>Agile</Text>
              </View>
           </View>
         )}
@@ -1715,7 +1712,7 @@ function SettingsModal({
       case 'service':
         return {
           title: '服务使用协议',
-          content: '欢迎使用 Agile Studio（以下简称“本软件”）。\n\n1. 软件用途：本软件是一款多功能相机工具，支持单/双画面拍摄与录制。\n2. 行为规范：用户应对使用本软件拍摄的所有内容承担法律责任，不得用于偷拍、监听等侵害他人隐私的行为。\n3. 数据存储：本软件产生的照片和视频默认存储在您的设备本地（DCIM/DualViewCamera），我们不提供云端备份服务，请自行保管重要数据。\n4. 免责声明：因硬件兼容性或系统原因导致的拍摄失败、数据丢失，本软件不承担赔偿责任。',
+          content: '欢迎使用 Agile（以下简称“本软件”）。\n\n1. 软件用途：本软件是一款多功能相机工具，支持单/双画面拍摄与录制。\n2. 行为规范：用户应对使用本软件拍摄的所有内容承担法律责任，不得用于偷拍、监听等侵害他人隐私的行为。\n3. 数据存储：本软件产生的照片和视频默认存储在您的设备本地（DCIM/DualViewCamera），我们不提供云端备份服务，请自行保管重要数据。\n4. 免责声明：因硬件兼容性或系统原因导致的拍摄失败、数据丢失，本软件不承担赔偿责任。',
         };
       case 'privacy':
         return {
@@ -1797,9 +1794,9 @@ function SettingsModal({
             ) : (
               <>
                 <SettingsSection title="软件信息">
-                  <Text style={styles.aboutAppTitle}>Agile Studio</Text>
+                  <Text style={styles.aboutAppTitle}>Agile</Text>
                   <Text style={styles.aboutVersion}>版本：1.0.0 (Build 20260419)</Text>
-                  <Text style={[styles.settingLine, { marginTop: 8 }]}>Agile Studio 是一款专为高效构图设计的双画面相机，支持主副画面同时采集。所有媒体文件均保存在本地 DCIM 目录，保护隐私，拒绝云端上传。</Text>
+                  <Text style={[styles.settingLine, { marginTop: 8 }]}>Agile 是一款专为高效构图设计的双画面相机，支持主副画面同时采集。所有媒体文件均保存在本地 DCIM 目录，保护隐私，拒绝云端上传。</Text>
                 </SettingsSection>
                 <SettingsSection title="合规指引">
                   <Pressable style={styles.legalLink} onPress={() => setLegalDoc('service')}>
@@ -1828,7 +1825,7 @@ function SettingsModal({
             {tab === 'about' && (
               <>
                 <SettingsSection title="开发者">
-                  <Text style={styles.settingLine}>© 2026 Agile Studio Dev Team.</Text>
+                  <Text style={styles.settingLine}>© 2026 Agile Dev Team.</Text>
                   <Text style={styles.settingLine}>基于 Vision Camera 5.0 引擎构建</Text>
                 </SettingsSection>
                 <SettingsSection title="设备能力">
@@ -2296,8 +2293,8 @@ const styles = StyleSheet.create({
   viewModeText: { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
   viewModeTextActive: { color: COLORS.text },
   transitionOverlay: { backgroundColor: 'rgba(20,20,20,0.82)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
-  transitionLogo: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  transitionLogoText: { color: 'rgba(255,255,255,0.4)', fontSize: 18, fontWeight: '900', letterSpacing: 2, textTransform: 'uppercase' },
+  transitionLogo: { paddingHorizontal: 32, paddingVertical: 16, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  transitionLogoText: { color: COLORS.text, fontSize: 32, fontWeight: '900', letterSpacing: 4, textTransform: 'uppercase', opacity: 0.9 },
   modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.44)' },
   settingsPanel: { maxHeight: '82%', padding: 18, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: '#151515' },
   settingsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
