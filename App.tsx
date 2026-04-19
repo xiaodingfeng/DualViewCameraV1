@@ -210,7 +210,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsInitializing(false);
-    }, 2500);
+    }, 1000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -237,6 +237,7 @@ function App(): React.JSX.Element {
       captureMode={captureMode}
       device={device}
       devicesCount={dCount}
+      isInitializing={isInitializing}
       microphoneReady={microphonePermission.hasPermission}
       onCaptureModeChange={setCaptureMode}
       onSwitchCamera={switchCamera}
@@ -249,6 +250,7 @@ function CameraShell({
   captureMode,
   device,
   devicesCount,
+  isInitializing,
   microphoneReady,
   onCaptureModeChange,
   onSwitchCamera,
@@ -257,6 +259,7 @@ function CameraShell({
   captureMode: CaptureMode;
   device: CameraDevice;
   devicesCount: number;
+  isInitializing: boolean;
   microphoneReady: boolean;
   onCaptureModeChange: (mode: CaptureMode) => void;
   onSwitchCamera: () => void;
@@ -327,6 +330,13 @@ function CameraShell({
   const [galleryItems, setGalleryItems] = useState<GalleryMedia[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
+  const [isSwitching, setIsSwitching] = useState(false);
+
+  useEffect(() => {
+    setIsSwitching(true);
+    const timer = setTimeout(() => setIsSwitching(false), 500);
+    return () => clearTimeout(timer);
+  }, [captureMode, viewMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -876,6 +886,7 @@ function CameraShell({
             fillScreen={isFullPreview}
             previewOutput={mainPreviewOutput}
             sessionRevision={sessionRevision}
+            isTransitioning={isInitializing || isSwitching || isBusy || pendingPhotoCapture || pendingVideoStart || !isAppActive}
           />
           <Pressable style={styles.focusLayer} onPress={focusAtPoint} />
           {focusPoint && <FocusBox point={focusPoint} />}
@@ -1524,6 +1535,7 @@ function MainPreview({
   previewOutput,
   sessionRevision,
   topOffset,
+  isTransitioning,
 }: {
   fillScreen: boolean;
   bottomOffset: number;
@@ -1534,6 +1546,7 @@ function MainPreview({
   previewOutput: any;
   sessionRevision: number;
   topOffset: number;
+  isTransitioning: boolean;
 }) {
   const centerStyle = useMemo(
     () => [styles.mainPreviewCenter, { top: topOffset, bottom: bottomOffset }],
@@ -1550,6 +1563,13 @@ function MainPreview({
     <View pointerEvents="none" style={centerStyle}>
       <View style={slotStyle}>
         <NativePreviewView key={`main-${sessionRevision}`} style={StyleSheet.absoluteFill} previewOutput={previewOutput} resizeMode="cover" implementationMode="compatible" hybridRef={hybridRef as never} />
+        {isTransitioning && (
+          <View style={[StyleSheet.absoluteFill, styles.transitionOverlay]}>
+             <View style={styles.transitionLogo}>
+                <Text style={styles.transitionLogoText}>Agile Studio</Text>
+             </View>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -2275,6 +2295,9 @@ const styles = StyleSheet.create({
   viewModeButton: { minWidth: 116, minHeight: 46, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   viewModeText: { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
   viewModeTextActive: { color: COLORS.text },
+  transitionOverlay: { backgroundColor: 'rgba(20,20,20,0.82)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+  transitionLogo: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  transitionLogoText: { color: 'rgba(255,255,255,0.4)', fontSize: 18, fontWeight: '900', letterSpacing: 2, textTransform: 'uppercase' },
   modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.44)' },
   settingsPanel: { maxHeight: '82%', padding: 18, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: '#151515' },
   settingsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
