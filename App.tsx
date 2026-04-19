@@ -5,14 +5,17 @@ import {
   BackHandler,
   GestureResponderEvent,
   Image,
+  Linking,
   LogBox,
   Modal,
   NativeModules,
   PanResponder,
   Platform,
   Pressable,
+  PermissionsAndroid,
   SafeAreaView,
   ScrollView,
+  Share,
   StatusBar,
   StyleSheet,
   Text,
@@ -50,6 +53,17 @@ type ViewMode = 'single' | 'dual';
 type FrameOrientation = 'portrait' | 'landscape';
 type FlashMode = 'off' | 'on' | 'auto';
 type LastMedia = { uri: string; type: 'photo' | 'video'; label: string } | null;
+type GalleryMedia = {
+  id: string;
+  uri: string;
+  type: 'photo' | 'video';
+  filename: string | null;
+  fileSize: number | null;
+  width: number;
+  height: number;
+  duration: number;
+  timestamp: number;
+};
 type AspectRatioId = 'full' | '1:1' | '4:3' | '16:9';
 type PhotoQuality = 'high' | 'standard' | 'low';
 type PhotoFormat = 'jpeg' | 'heic';
@@ -289,6 +303,9 @@ function CameraShell({
   const [previewIssue, setPreviewIssue] = useState('');
   const [isAppActive, setIsAppActive] = useState(startsActive);
   const [sessionRevision, setSessionRevision] = useState(0);
+  const [galleryItems, setGalleryItems] = useState<GalleryMedia[]>([]);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryIndex, setGalleryIndex] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -566,13 +583,40 @@ function CameraShell({
     return () => clearTimeout(timer);
   }, [toast]);
 
+  const refreshGallery = useCallback(async () => {
+    const items = await loadDualViewGallery();
+    setGalleryItems(items);
+    setLastMedia(mediaToLastMedia(items[0] ?? null));
+    setGalleryIndex(current => items.length === 0 ? 0 : Math.min(current, items.length - 1));
+    return items;
+  }, []);
+
+  useEffect(() => {
+    refreshGallery().catch(() => {});
+  }, [refreshGallery]);
+
+  useEffect(() => {
+    if (!isAppActive) return;
+    refreshGallery().catch(() => {});
+  }, [isAppActive, refreshGallery]);
+
+  useEffect(() => {
+    if (!galleryOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setGalleryOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [galleryOpen]);
+
   const saveToGallery = useCallback(async (filePath: string, type: 'photo' | 'video', label: string) => {
     const sourcePath = type === 'video' ? await ensureVideoExtension(filePath, label) : filePath;
     const uri = toFileUri(sourcePath);
-    await CameraRoll.saveAsset(uri, { type, album: 'DualViewCamera' });
-    setLastMedia({ uri, type, label });
-    return uri;
-  }, []);
+    const saved = await CameraRoll.saveAsset(uri, { type, album: 'DualViewCamera' });
+    setLastMedia(mediaToLastMedia(cameraRollNodeToGalleryMedia(saved)));
+    refreshGallery().catch(() => {});
+    return saved.node.image.uri;
+  }, [refreshGallery]);
 
   const saveCapturedPhotoInBackground = useCallback((filePath: string, options: { mainSpec: VisibleFrameSpec; subSpec: VisibleFrameSpec; dual: boolean; format: PhotoFormat }) => {
     void (async () => {
@@ -739,12 +783,37 @@ function CameraShell({
   }, []);
 
   const openLastMedia = useCallback(() => {
-    if (lastMedia == null) {
+    if (galleryItems.length === 0) {
       setToast('还没有拍摄内容');
       return;
     }
-    Alert.alert('最近保存', `${lastMedia.label}\n${lastMedia.uri}`);
-  }, [lastMedia]);
+    setGalleryIndex(0);
+    setGalleryOpen(true);
+    refreshGallery().catch(() => {});
+  }, [galleryItems.length, refreshGallery]);
+
+  const closeGallery = useCallback(() => {
+    setGalleryOpen(false);
+  }, []);
+
+  const handleGalleryDelete = useCallback(async (item: GalleryMedia) => {
+    try {
+      await CameraRoll.deletePhotos([item.uri]);
+      const nextItems = galleryItems.filter(media => media.id !== item.id);
+      setGalleryItems(nextItems);
+      setLastMedia(mediaToLastMedia(nextItems[0] ?? null));
+      if (nextItems.length === 0) {
+        setGalleryOpen(false);
+        setGalleryIndex(0);
+      } else {
+        setGalleryIndex(current => Math.min(current, nextItems.length - 1));
+      }
+      setToast('已删除');
+      refreshGallery().catch(() => {});
+    } catch (error) {
+      setToast(cameraErrorMessage(error, '删除失败'));
+    }
+  }, [galleryItems, refreshGallery]);
 
   const lastPinchDist = useRef<number | null>(null);
   const onTouchMove = useCallback((event: GestureResponderEvent) => {
@@ -872,6 +941,14 @@ function CameraShell({
         videoQuality={videoQuality}
         onVideoQualityChange={setVideoQuality}
         viewMode={viewMode}
+      />
+      <GalleryModal
+        index={galleryIndex}
+        items={galleryItems}
+        onClose={closeGallery}
+        onDelete={handleGalleryDelete}
+        onIndexChange={setGalleryIndex}
+        open={galleryOpen}
       />
     </SafeAreaView>
   );
@@ -1007,6 +1084,131 @@ function BottomControls({ captureMode, isBusy, isRecording, lastMedia, onCapture
           <Text style={[styles.viewModeText, viewMode === 'dual' && styles.viewModeTextActive]}>双画面</Text>
         </Pressable>
       </View>
+    </View>
+  );
+}
+
+function GalleryModal({
+  index,
+  items,
+  onClose,
+  onDelete,
+  onIndexChange,
+  open,
+}: {
+  index: number;
+  items: GalleryMedia[];
+  onClose: () => void;
+  onDelete: (item: GalleryMedia) => void;
+  onIndexChange: (index: number) => void;
+  open: boolean;
+}) {
+  const scrollerRef = useRef<ScrollView | null>(null);
+  const [viewerWidth, setViewerWidth] = useState(0);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const current = items[index] ?? null;
+
+  useEffect(() => {
+    if (!open || viewerWidth <= 0) return;
+    requestAnimationFrame(() => {
+      scrollerRef.current?.scrollTo({ x: index * viewerWidth, animated: false });
+    });
+  }, [index, open, viewerWidth]);
+
+  useEffect(() => {
+    if (!open) {
+      setDetailsOpen(false);
+    }
+  }, [open]);
+
+  const shareCurrent = useCallback(() => {
+    if (current == null) return;
+    Share.share({ title: current.filename ?? 'DualViewCamera', url: current.uri, message: current.uri }).catch(() => {});
+  }, [current]);
+
+  const openCurrent = useCallback(() => {
+    if (current == null) return;
+    Linking.openURL(current.uri).catch(() => {});
+  }, [current]);
+
+  const confirmDelete = useCallback(() => {
+    if (current == null) return;
+    Alert.alert('删除这项？', current.filename ?? current.uri, [
+      { text: '取消', style: 'cancel' },
+      { text: '删除', style: 'destructive', onPress: () => onDelete(current) },
+    ]);
+  }, [current, onDelete]);
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} visible={open}>
+      <View
+        style={styles.galleryRoot}
+        onLayout={event => setViewerWidth(event.nativeEvent.layout.width)}
+      >
+        <View style={styles.galleryTopBar}>
+          <Text style={styles.galleryCount}>{items.length > 0 ? `${index + 1}/${items.length}` : '0/0'}</Text>
+        </View>
+        {viewerWidth > 0 && items.length > 0 ? (
+          <ScrollView
+            ref={scrollerRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={event => {
+              const nextIndex = Math.round(event.nativeEvent.contentOffset.x / viewerWidth);
+              onIndexChange(clamp(nextIndex, 0, items.length - 1));
+            }}
+          >
+            {items.map(item => (
+              <Pressable key={item.id} style={[styles.galleryPage, { width: viewerWidth }]} onPress={() => setDetailsOpen(value => !value)}>
+                {item.type === 'photo' ? (
+                  <Image source={{ uri: item.uri }} style={styles.galleryImage} resizeMode="contain" />
+                ) : (
+                  <View style={styles.videoPreview}>
+                    <Text style={styles.videoPreviewIcon}>▶</Text>
+                    <Text style={styles.videoPreviewTitle}>视频</Text>
+                    <Text style={styles.videoPreviewText}>{formatDuration(Math.floor(item.duration || 0))}</Text>
+                    <Text style={styles.videoPreviewHint}>点“操作”可用系统查看或分享</Text>
+                  </View>
+                )}
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.galleryEmpty}><Text style={styles.galleryEmptyText}>还没有拍摄内容</Text></View>
+        )}
+        {detailsOpen && current ? <MediaDetails item={current} /> : null}
+        {current ? (
+          <View style={styles.galleryBottomBar}>
+            <Pressable style={styles.galleryBottomButton} onPress={() => setDetailsOpen(value => !value)}>
+              <Text style={styles.galleryBottomText}>详情</Text>
+            </Pressable>
+            <Pressable style={styles.galleryBottomButton} onPress={shareCurrent}>
+              <Text style={styles.galleryBottomText}>分享</Text>
+            </Pressable>
+            <Pressable style={styles.galleryBottomButton} onPress={openCurrent}>
+              <Text style={styles.galleryBottomText}>查看</Text>
+            </Pressable>
+            <Pressable style={[styles.galleryBottomButton, styles.galleryDeleteButton]} onPress={confirmDelete}>
+              <Text style={[styles.galleryBottomText, styles.galleryDeleteText]}>删除</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+    </Modal>
+  );
+}
+
+function MediaDetails({ item }: { item: GalleryMedia }) {
+  return (
+    <View style={styles.mediaDetails}>
+      <Text style={styles.mediaDetailsTitle}>{item.type === 'photo' ? '照片详情' : '视频详情'}</Text>
+      <Text style={styles.mediaDetailsText}>文件：{item.filename ?? '未知'}</Text>
+      <Text style={styles.mediaDetailsText}>时间：{formatTimestamp(item.timestamp)}</Text>
+      <Text style={styles.mediaDetailsText}>尺寸：{item.width || '-'} × {item.height || '-'}</Text>
+      {item.type === 'video' ? <Text style={styles.mediaDetailsText}>时长：{formatDuration(Math.floor(item.duration || 0))}</Text> : null}
+      <Text style={styles.mediaDetailsText}>大小：{formatBytes(item.fileSize)}</Text>
+      <Text style={styles.mediaDetailsPath} numberOfLines={2}>{item.uri}</Text>
     </View>
   );
 }
@@ -1274,6 +1476,72 @@ function RoundButton({ active = false, label, onPress, style, children }: { acti
   return <Pressable style={[styles.roundButton, active && styles.roundButtonActive, style]} onPress={onPress}>{children ? children : <Text style={styles.roundButtonText}>{label}</Text>}</Pressable>;
 }
 
+async function requestGalleryReadPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const version = typeof Platform.Version === 'number' ? Platform.Version : Number(Platform.Version);
+  try {
+    if (version >= 33) {
+      const permissions = [
+        (PermissionsAndroid.PERMISSIONS as any).READ_MEDIA_IMAGES,
+        (PermissionsAndroid.PERMISSIONS as any).READ_MEDIA_VIDEO,
+      ].filter(Boolean) as string[];
+      if (permissions.length === 0) return true;
+      const result = await PermissionsAndroid.requestMultiple(permissions as any) as Record<string, string>;
+      return permissions.every(permission => result[permission] === PermissionsAndroid.RESULTS.GRANTED);
+    }
+    const permission = PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+    const granted = await PermissionsAndroid.request(permission);
+    return granted === PermissionsAndroid.RESULTS.GRANTED;
+  } catch {
+    return false;
+  }
+}
+
+async function loadDualViewGallery(): Promise<GalleryMedia[]> {
+  const hasPermission = await requestGalleryReadPermission();
+  if (!hasPermission) return [];
+  try {
+    const result = await CameraRoll.getPhotos({
+      first: 80,
+      assetType: 'All',
+      groupTypes: 'Album',
+      groupName: 'DualViewCamera',
+      include: ['filename', 'fileSize', 'imageSize', 'playableDuration'],
+    });
+    return result.edges.map(cameraRollNodeToGalleryMedia).filter(Boolean) as GalleryMedia[];
+  } catch {
+    return [];
+  }
+}
+
+function cameraRollNodeToGalleryMedia(asset: any): GalleryMedia | null {
+  const node = asset?.node;
+  const image = node?.image;
+  if (!node || !image?.uri) return null;
+  const rawType = String(node.type ?? '');
+  const type: 'photo' | 'video' = rawType.toLowerCase().includes('video') || image.playableDuration > 0 ? 'video' : 'photo';
+  return {
+    id: String(node.id ?? image.uri),
+    uri: image.uri,
+    type,
+    filename: image.filename ?? null,
+    fileSize: typeof image.fileSize === 'number' ? image.fileSize : null,
+    width: Number(image.width ?? 0),
+    height: Number(image.height ?? 0),
+    duration: Number(image.playableDuration ?? 0),
+    timestamp: Number(node.timestamp ?? node.modificationTimestamp ?? 0),
+  };
+}
+
+function mediaToLastMedia(item: GalleryMedia | null): LastMedia {
+  if (item == null) return null;
+  return {
+    uri: item.uri,
+    type: item.type,
+    label: item.filename ?? (item.type === 'photo' ? '照片' : '视频'),
+  };
+}
+
 function toFileUri(path: string): string { return path.startsWith('file://') ? path : `file://${path}`; }
 function toLocalPath(path: string): string { return path.replace(/^file:\/\//, ''); }
 async function ensureVideoExtension(filePath: string, label: string): Promise<string> {
@@ -1403,6 +1671,18 @@ function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
   const seconds = (totalSeconds % 60).toString().padStart(2, '0');
   return `${minutes}:${seconds}`;
+}
+function formatTimestamp(timestamp: number): string {
+  if (!timestamp) return '未知';
+  const millis = timestamp > 100000000000 ? timestamp : timestamp * 1000;
+  return new Date(millis).toLocaleString('zh-CN', { hour12: false });
+}
+function formatBytes(bytes: number | null): string {
+  if (bytes == null || !Number.isFinite(bytes)) return '未知';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 function calculateContainedFrame(containerWidth: number, containerHeight: number, aspectRatio?: number): { width: any; height: any } {
   if (containerWidth <= 0 || containerHeight <= 0 || aspectRatio == null) {
@@ -1555,6 +1835,29 @@ const styles = StyleSheet.create({
   chipTextActive: { color: COLORS.text },
   settingLine: { color: COLORS.muted, fontSize: 12, lineHeight: 22 },
   focusBox: { position: 'absolute', width: 72, height: 72, borderWidth: 2, borderColor: COLORS.accent, borderRadius: 4 },
+  galleryRoot: { flex: 1, backgroundColor: '#000' },
+  galleryTopBar: { position: 'absolute', left: 0, right: 0, top: 0, zIndex: 5, paddingTop: TOP_BAR_OFFSET, paddingHorizontal: 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
+  galleryTopButton: { minWidth: 58, height: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  galleryTopText: { color: COLORS.text, fontSize: 14, fontWeight: '800' },
+  galleryCount: { color: COLORS.text, fontSize: 14, fontWeight: '900' },
+  galleryPage: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
+  galleryImage: { width: '100%', height: '100%' },
+  galleryEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  galleryEmptyText: { color: COLORS.muted, fontSize: 14, fontWeight: '700' },
+  videoPreview: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+  videoPreviewIcon: { color: COLORS.text, fontSize: 54, fontWeight: '900', marginBottom: 12 },
+  videoPreviewTitle: { color: COLORS.text, fontSize: 22, fontWeight: '900', marginBottom: 8 },
+  videoPreviewText: { color: COLORS.muted, fontSize: 16, fontWeight: '800', marginBottom: 10 },
+  videoPreviewHint: { color: COLORS.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  galleryBottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 5, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 26, flexDirection: 'row', gap: 10, justifyContent: 'space-between', backgroundColor: 'transparent' },
+  galleryBottomButton: { flex: 1, height: 42, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.12)' },
+  galleryDeleteButton: { backgroundColor: 'rgba(255,59,48,0.18)' },
+  galleryBottomText: { color: COLORS.text, fontSize: 13, fontWeight: '900' },
+  galleryDeleteText: { color: '#ff8a82' },
+  mediaDetails: { position: 'absolute', left: 16, right: 16, bottom: 92, zIndex: 6, padding: 14, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.78)', borderWidth: 1, borderColor: COLORS.line },
+  mediaDetailsTitle: { color: COLORS.text, fontSize: 15, fontWeight: '900', marginBottom: 8 },
+  mediaDetailsText: { color: COLORS.muted, fontSize: 12, lineHeight: 20 },
+  mediaDetailsPath: { color: 'rgba(255,255,255,0.48)', fontSize: 11, lineHeight: 16, marginTop: 6 },
 });
 
 export default App;
