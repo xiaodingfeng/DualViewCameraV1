@@ -73,7 +73,6 @@ type PhotoFormat = 'jpeg' | 'heic';
 type VideoQuality = '720' | '1080' | '4K' | '8K';
 type VideoFps = 30 | 60;
 type VideoCodecFormat = 'h265' | 'h264';
-type SettingsTab = 'photo' | 'video';
 type PhotoVariant = 'full' | 'portrait' | 'landscape' | 'square' | 'photo4x3' | 'video16x9';
 type VisibleFrameSpec = { aspect: number; variant: PhotoVariant };
 type PersistedSettings = Partial<{
@@ -1628,6 +1627,9 @@ function Toast({ message }: { message: string }) {
   );
 }
 
+type SettingsTab = 'photo' | 'video' | 'about';
+type LegalDocType = 'service' | 'privacy' | 'sharing' | null;
+
 function SettingsModal({
   device,
   devicesCount,
@@ -1672,11 +1674,13 @@ function SettingsModal({
   viewMode: ViewMode;
 }) {
   const [tab, setTab] = useState<SettingsTab>('photo');
+  const [legalDoc, setLegalDoc] = useState<LegalDocType>(null);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gestureState) => {
-      // 只有明显的向下滑动（dy > 15）且侧向位移小时才拦截
+      // 在二级页面打开时，不触发下滑关闭弹窗
+      if (legalDoc) return false;
       return gestureState.dy > 15 && Math.abs(gestureState.dx) < 15;
     },
     onPanResponderRelease: (_, gestureState) => {
@@ -1684,7 +1688,31 @@ function SettingsModal({
         onClose();
       }
     },
-  }), [onClose]);
+  }), [onClose, legalDoc]);
+
+  const renderLegalContent = () => {
+    switch (legalDoc) {
+      case 'service':
+        return {
+          title: '服务使用协议',
+          content: '欢迎使用 Agile Studio（以下简称“本软件”）。\n\n1. 软件用途：本软件是一款多功能相机工具，支持单/双画面拍摄与录制。\n2. 行为规范：用户应对使用本软件拍摄的所有内容承担法律责任，不得用于偷拍、监听等侵害他人隐私的行为。\n3. 数据存储：本软件产生的照片和视频默认存储在您的设备本地（DCIM/DualViewCamera），我们不提供云端备份服务，请自行保管重要数据。\n4. 免责声明：因硬件兼容性或系统原因导致的拍摄失败、数据丢失，本软件不承担赔偿责任。',
+        };
+      case 'privacy':
+        return {
+          title: '隐私保护政策',
+          content: '我们高度重视您的隐私。\n\n1. 权限说明：\n   - 相机权限：用于实时取景、拍照及录制视频。\n   - 麦克风权限：用于录制视频时采集音频。\n   - 存储权限：用于将拍摄结果保存至系统相册，以及读取历史作品。\n2. 数据收集：本软件为纯本地工具类应用。除非您主动分享，我们不会收集、上传或向任何服务器传输您的照片、视频或个人地理位置信息。\n3. 权限管理：您可以随时在系统设置中撤回已授权的权限，但这将导致对应功能无法使用。',
+        };
+      case 'sharing':
+        return {
+          title: '第三方信息共享清单',
+          content: '为保障应用稳定运行及功能实现，本软件接入了以下第三方 SDK/库：\n\n1. React Native Vision Camera：用于提供高性能相机渲染及底层采集能力。\n2. CameraRoll：用于实现与系统相册的安全交互（保存及读取）。\n3. React Native FS：用于管理本地临时文件及裁剪文件的生成。\n4. SVG Transformer：用于界面图标的渲染。\n\n上述组件均仅在本地运行，不涉及向第三方服务器共享您的个人身份信息。',
+        };
+      default:
+        return null;
+    }
+  };
+
+  const currentLegal = renderLegalContent();
 
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
@@ -1704,6 +1732,9 @@ function SettingsModal({
             </Pressable>
             <Pressable style={[styles.settingsTab, tab === 'video' && styles.settingsTabActive]} onPress={() => setTab('video')}>
               <Text style={[styles.settingsTabText, tab === 'video' && styles.settingsTabTextActive]}>录像</Text>
+            </Pressable>
+            <Pressable style={[styles.settingsTab, tab === 'about' && styles.settingsTabActive]} onPress={() => setTab('about')}>
+              <Text style={[styles.settingsTabText, tab === 'about' && styles.settingsTabTextActive]}>关于</Text>
             </Pressable>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -1725,7 +1756,7 @@ function SettingsModal({
                   <Chip active={flashMode === 'on'} disabled={!device?.hasFlash && !device?.hasTorch} label="开启" onPress={() => onFlashModeChange('on')} />
                 </SettingsSection>
               </>
-            ) : (
+            ) : tab === 'video' ? (
               <>
                 <SettingsSection title="默认帧率">
                   {([30, 60] as VideoFps[]).map(value => (
@@ -1743,17 +1774,67 @@ function SettingsModal({
                   ))}
                 </SettingsSection>
               </>
+            ) : (
+              <>
+                <SettingsSection title="软件信息">
+                  <Text style={styles.aboutAppTitle}>Agile Studio</Text>
+                  <Text style={styles.aboutVersion}>版本：1.0.0 (Build 20260419)</Text>
+                  <Text style={[styles.settingLine, { marginTop: 8 }]}>Agile Studio 是一款专为高效构图设计的双画面相机，支持主副画面同时采集。所有媒体文件均保存在本地 DCIM 目录，保护隐私，拒绝云端上传。</Text>
+                </SettingsSection>
+                <SettingsSection title="合规指引">
+                  <Pressable style={styles.legalLink} onPress={() => setLegalDoc('service')}>
+                    <Text style={styles.legalLinkText}>服务使用协议</Text>
+                    <Text style={styles.legalArrow}>›</Text>
+                  </Pressable>
+                  <Pressable style={styles.legalLink} onPress={() => setLegalDoc('privacy')}>
+                    <Text style={styles.legalLinkText}>隐私保护政策</Text>
+                    <Text style={styles.legalArrow}>›</Text>
+                  </Pressable>
+                  <Pressable style={styles.legalLink} onPress={() => setLegalDoc('sharing')}>
+                    <Text style={styles.legalLinkText}>第三方信息共享清单</Text>
+                    <Text style={styles.legalArrow}>›</Text>
+                  </Pressable>
+                </SettingsSection>
+              </>
             )}
-            <SettingsSection title="双画面">
-              <Chip active={viewMode === 'dual'} label="双画面预览已开启" />
-              <Chip active={saveDualOutputs} label="双画面同时保存" onPress={() => setSaveDualOutputs(!saveDualOutputs)} />
-            </SettingsSection>
-            <SettingsSection title="设备能力">
-              <Text style={styles.settingLine}>镜头数量：{devicesCount}</Text>
-              <Text style={styles.settingLine}>缩放：{device?.minZoom}x ~ {device?.maxZoom}x</Text>
-            </SettingsSection>
+            
+            {(tab === 'photo' || tab === 'video') && (
+              <SettingsSection title="双画面">
+                <Chip active={viewMode === 'dual'} label="双画面预览已开启" />
+                <Chip active={saveDualOutputs} label="双画面同时保存" onPress={() => setSaveDualOutputs(!saveDualOutputs)} />
+              </SettingsSection>
+            )}
+            
+            {tab === 'about' && (
+              <>
+                <SettingsSection title="开发者">
+                  <Text style={styles.settingLine}>© 2026 Agile Studio Dev Team.</Text>
+                  <Text style={styles.settingLine}>基于 Vision Camera 5.0 引擎构建</Text>
+                </SettingsSection>
+                <SettingsSection title="设备能力">
+                  <Text style={styles.settingLine}>镜头数量：{devicesCount}</Text>
+                  <Text style={styles.settingLine}>缩放范围：{device?.minZoom?.toFixed(1)}x ~ {device?.maxZoom?.toFixed(1)}x</Text>
+                </SettingsSection>
+              </>
+            )}
             <View style={{ height: 40 }} />
           </ScrollView>
+
+          {/* 二级页面覆盖层 */}
+          {legalDoc && currentLegal && (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#151515', borderRadius: 24, zIndex: 100 }]}>
+              <View style={styles.settingsHeader}>
+                <Pressable onPress={() => setLegalDoc(null)} style={{ paddingVertical: 4 }}>
+                   <Text style={styles.closeText}>‹ 返回</Text>
+                </Pressable>
+                <Text style={styles.settingsTitle}>{currentLegal.title}</Text>
+                <View style={{ width: 40 }} />
+              </View>
+              <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+                <Text style={styles.legalContentText}>{currentLegal.content}</Text>
+              </ScrollView>
+            </View>
+          )}
         </View>
       </View>
     </Modal>
@@ -2204,6 +2285,12 @@ const styles = StyleSheet.create({
   settingsTabActive: { backgroundColor: '#2d2d2d' },
   settingsTabText: { color: COLORS.muted, fontSize: 13, fontWeight: '800' },
   settingsTabTextActive: { color: COLORS.text },
+  aboutAppTitle: { color: COLORS.text, fontSize: 18, fontWeight: '900', marginBottom: 2 },
+  aboutVersion: { color: COLORS.muted, fontSize: 11, marginBottom: 4 },
+  legalLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  legalLinkText: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
+  legalArrow: { color: COLORS.muted, fontSize: 18, fontWeight: '300' },
+  legalContentText: { color: COLORS.muted, fontSize: 13, lineHeight: 22, padding: 4 },
   settingsSection: { marginBottom: 16, padding: 14, borderRadius: 18, backgroundColor: '#222' },
   sectionTitle: { color: COLORS.text, fontSize: 15, fontWeight: '900', marginBottom: 10 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
