@@ -561,10 +561,14 @@ function CameraShell({
          enableShutterSound: true,
       }, {});
       if (viewMode === 'dual' && saveDualOutputs) {
-        const mainPath = await createPhotoVariantForAspect(file.filePath, mainFrameSpec, 'main');
-        const subPath = await createPhotoVariantForAspect(file.filePath, subFrameSpec, 'sub');
-        await saveToGallery(mainPath, 'photo', '主画面');
-        await saveToGallery(subPath, 'photo', '副画面');
+        const [mainPath, subPath] = await Promise.all([
+          createPhotoVariantForAspect(file.filePath, mainFrameSpec, 'main'),
+          createPhotoVariantForAspect(file.filePath, subFrameSpec, 'sub'),
+        ]);
+        await Promise.all([
+          saveToGallery(mainPath, 'photo', '主画面'),
+          saveToGallery(subPath, 'photo', '副画面'),
+        ]);
         setToast('拍照成功，已保存 2 个文件');
       } else {
         const mainPath = await createPhotoVariantForAspect(file.filePath, mainFrameSpec, 'main');
@@ -623,6 +627,7 @@ function CameraShell({
           setIsRecording(false);
           setRecordingStartedAt(null);
           recorderRef.current = null;
+          setToast('录像已停止，正在后台保存');
           finishRecording(filePath);
         },
         error => {

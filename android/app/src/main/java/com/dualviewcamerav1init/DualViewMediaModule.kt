@@ -97,6 +97,11 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       )
       
       val targetSpec = videoTargetSpec(variant, targetWidth, targetHeight)
+      if (isSourceAspectCloseToTarget(source, targetSpec)) {
+        promise.resolve(source.absolutePath)
+        return
+      }
+
       val videoEffects = mutableListOf<Effect>()
       videoEffects.add(
           Presentation.createForWidthAndHeight(
@@ -168,6 +173,30 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   private fun copyFile(source: File, target: File) {
     source.inputStream().use { input ->
       FileOutputStream(target).use { output -> input.copyTo(output) }
+    }
+  }
+
+  private fun isSourceAspectCloseToTarget(source: File, targetSpec: VideoTargetSpec): Boolean {
+    val retriever = MediaMetadataRetriever()
+    return try {
+      retriever.setDataSource(source.absolutePath)
+      val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toDoubleOrNull() ?: return false
+      val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toDoubleOrNull() ?: return false
+      val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+      if (width <= 0.0 || height <= 0.0) return false
+
+      val displayWidth = if (rotation == 90 || rotation == 270) height else width
+      val displayHeight = if (rotation == 90 || rotation == 270) width else height
+      val sourceAspect = displayWidth / displayHeight
+      val targetAspect = targetSpec.width.toDouble() / targetSpec.height.toDouble()
+      kotlin.math.abs(sourceAspect - targetAspect) < 0.015
+    } catch (_: Throwable) {
+      false
+    } finally {
+      try {
+        retriever.release()
+      } catch (_: Throwable) {
+      }
     }
   }
 
