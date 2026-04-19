@@ -14,12 +14,14 @@ import {
   Platform,
   Pressable,
   PermissionsAndroid,
+  requireNativeComponent,
   SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   View,
+  type ViewProps,
 } from 'react-native';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import RNFS from 'react-native-fs';
@@ -84,6 +86,11 @@ type PersistedSettings = Partial<{
   viewMode: ViewMode;
   saveDualOutputs: boolean;
 }>;
+
+type NativeVideoViewProps = ViewProps & { sourceUri: string };
+const NativeDualViewVideoView = Platform.OS === 'android'
+  ? requireNativeComponent<NativeVideoViewProps>('DualViewVideoView')
+  : null;
 
 const COLORS = {
   bg: '#000000',
@@ -1123,6 +1130,7 @@ function GalleryModal({
   const [viewerWidth, setViewerWidth] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(() => new Set());
+  const [zoomLocked, setZoomLocked] = useState(false);
   const current = items[index] ?? null;
 
   useEffect(() => {
@@ -1136,6 +1144,7 @@ function GalleryModal({
     if (!open) {
       setDetailsOpen(false);
       setFailedPreviewIds(new Set());
+      setZoomLocked(false);
     }
   }, [open]);
 
@@ -1184,25 +1193,30 @@ function GalleryModal({
             maxToRenderPerBatch={3}
             pagingEnabled
             removeClippedSubviews
+            scrollEnabled={!zoomLocked}
             renderItem={({ item, index: itemIndex }) => (
-              <Pressable style={[styles.galleryPage, { width: viewerWidth }]} onPress={() => setDetailsOpen(value => !value)}>
+              <View style={[styles.galleryPage, { width: viewerWidth }]}>
                 {Math.abs(itemIndex - index) > 2 ? (
                   <View style={styles.galleryLazyPage} />
                 ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
-                  <Image
-                    source={{ uri: item.uri }}
-                    style={styles.galleryImage}
-                    resizeMode="contain"
-                    onError={() => setFailedPreviewIds(previous => {
+                  <ZoomablePhoto
+                    item={item}
+                    onPreviewError={() => setFailedPreviewIds(previous => {
                       const next = new Set(previous);
                       next.add(item.id);
                       return next;
                     })}
+                    onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined}
+                  />
+                ) : item.type === 'video' ? (
+                  <InlineVideoPlayer
+                    item={item}
+                    onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined}
                   />
                 ) : (
                   <MediaPreviewFallback item={item} />
                 )}
-              </Pressable>
+              </View>
             )}
             showsHorizontalScrollIndicator={false}
             windowSize={5}
@@ -1210,6 +1224,7 @@ function GalleryModal({
             onMomentumScrollEnd={event => {
               const nextIndex = Math.round(event.nativeEvent.contentOffset.x / viewerWidth);
               onIndexChange(clamp(nextIndex, 0, items.length - 1));
+              setZoomLocked(false);
             }}
             onScrollToIndexFailed={info => {
               setTimeout(() => {
@@ -1239,6 +1254,213 @@ function GalleryModal({
         ) : null}
       </View>
     </Modal>
+  );
+}
+
+function ZoomablePhoto({
+  item,
+  onPreviewError,
+  onZoomActiveChange,
+}: {
+  item: GalleryMedia;
+  onPreviewError: () => void;
+  onZoomActiveChange?: (active: boolean) => void;
+}) {
+  const [scale, setScale] = useState(1);
+  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const imageFrame = useMemo(
+    () => containedMediaFrame(containerSize.width, containerSize.height, item.width, item.height),
+    [containerSize.height, containerSize.width, item.height, item.width],
+  );
+  const baseScaleRef = useRef(1);
+  const baseTranslateRef = useRef({ x: 0, y: 0 });
+  const startCenterRef = useRef<{ x: number; y: number } | null>(null);
+  const startDistanceRef = useRef<number | null>(null);
+  const panStartRef = useRef<{ x: number; y: number } | null>(null);
+  const scaleRef = useRef(1);
+  const translateRef = useRef({ x: 0, y: 0 });
+  const touchCountRef = useRef(0);
+
+  useEffect(() => {
+    scaleRef.current = scale;
+    onZoomActiveChange?.(scale > 1.02);
+  }, [onZoomActiveChange, scale]);
+
+  useEffect(() => {
+    translateRef.current = translate;
+  }, [translate]);
+
+  useEffect(() => {
+    setScale(1);
+    setTranslate({ x: 0, y: 0 });
+    baseScaleRef.current = 1;
+    baseTranslateRef.current = { x: 0, y: 0 };
+    startDistanceRef.current = null;
+    startCenterRef.current = null;
+    panStartRef.current = null;
+    onZoomActiveChange?.(false);
+  }, [item.id, onZoomActiveChange]);
+
+  const updateScaleAndTranslate = useCallback((nextScale: number, nextTranslate: { x: number; y: number }) => {
+    const boundedScale = clamp(nextScale, 1, 4);
+    setScale(boundedScale);
+    setTranslate(clampPhotoTranslate(nextTranslate, boundedScale, containerSize, imageFrame));
+  }, [containerSize, imageFrame]);
+
+  return (
+    <View
+      style={styles.zoomablePhoto}
+      onLayout={event => {
+        const { width, height } = event.nativeEvent.layout;
+        setContainerSize({ width, height });
+      }}
+      onTouchStart={event => {
+        touchCountRef.current = event.nativeEvent.touches.length;
+        const distance = touchDistance(event.nativeEvent.touches);
+        const center = touchCenter(event.nativeEvent.touches);
+        if (distance != null) {
+          startDistanceRef.current = distance;
+          startCenterRef.current = center;
+          baseScaleRef.current = scaleRef.current;
+          baseTranslateRef.current = translateRef.current;
+          onZoomActiveChange?.(true);
+        } else if (scaleRef.current > 1.02 && event.nativeEvent.touches[0]) {
+          panStartRef.current = {
+            x: event.nativeEvent.touches[0].pageX,
+            y: event.nativeEvent.touches[0].pageY,
+          };
+          baseTranslateRef.current = translateRef.current;
+        }
+      }}
+      onTouchMove={event => {
+        touchCountRef.current = event.nativeEvent.touches.length;
+        const distance = touchDistance(event.nativeEvent.touches);
+        const center = touchCenter(event.nativeEvent.touches);
+        if (distance != null && center != null) {
+          if (startDistanceRef.current == null) {
+            startDistanceRef.current = distance;
+            startCenterRef.current = center;
+            baseScaleRef.current = scaleRef.current;
+            baseTranslateRef.current = translateRef.current;
+            onZoomActiveChange?.(true);
+            return;
+          }
+          const nextScale = clamp(baseScaleRef.current * (distance / startDistanceRef.current), 1, 4);
+          const startCenter = startCenterRef.current ?? center;
+          const zoomCenter = clampPointToMediaRect(center, containerSize, imageFrame);
+          const origin = {
+            x: zoomCenter.x - containerSize.width / 2,
+            y: zoomCenter.y - containerSize.height / 2,
+          };
+          const scaleRatio = nextScale / Math.max(0.001, baseScaleRef.current);
+          const nextTranslate = {
+            x: baseTranslateRef.current.x + (center.x - startCenter.x) + (origin.x - baseTranslateRef.current.x) * (1 - scaleRatio),
+            y: baseTranslateRef.current.y + (center.y - startCenter.y) + (origin.y - baseTranslateRef.current.y) * (1 - scaleRatio),
+          };
+          updateScaleAndTranslate(nextScale, nextTranslate);
+          return;
+        }
+        if (scaleRef.current <= 1.02 || !event.nativeEvent.touches[0]) return;
+        if (panStartRef.current == null) {
+          panStartRef.current = {
+            x: event.nativeEvent.touches[0].pageX,
+            y: event.nativeEvent.touches[0].pageY,
+          };
+          baseTranslateRef.current = translateRef.current;
+          return;
+        }
+        const nextTranslate = {
+          x: baseTranslateRef.current.x + event.nativeEvent.touches[0].pageX - panStartRef.current.x,
+          y: baseTranslateRef.current.y + event.nativeEvent.touches[0].pageY - panStartRef.current.y,
+        };
+        updateScaleAndTranslate(scaleRef.current, nextTranslate);
+      }}
+      onTouchEnd={event => {
+        touchCountRef.current = event.nativeEvent.touches.length;
+        if (touchCountRef.current >= 2) {
+          const distance = touchDistance(event.nativeEvent.touches);
+          const center = touchCenter(event.nativeEvent.touches);
+          startDistanceRef.current = distance;
+          startCenterRef.current = center;
+          baseScaleRef.current = scaleRef.current;
+          baseTranslateRef.current = translateRef.current;
+          return;
+        }
+        startDistanceRef.current = null;
+        startCenterRef.current = null;
+        panStartRef.current = null;
+        baseTranslateRef.current = translateRef.current;
+        if (scaleRef.current <= 1.02) {
+          setScale(1);
+          setTranslate({ x: 0, y: 0 });
+          onZoomActiveChange?.(false);
+        }
+      }}
+      onTouchCancel={() => {
+        touchCountRef.current = 0;
+        startDistanceRef.current = null;
+        startCenterRef.current = null;
+        panStartRef.current = null;
+        if (scaleRef.current <= 1.02) {
+          setScale(1);
+          setTranslate({ x: 0, y: 0 });
+          onZoomActiveChange?.(false);
+        }
+      }}
+    >
+      <View style={[styles.zoomableImageFrame, imageFrame, { transform: [{ translateX: translate.x }, { translateY: translate.y }, { scale }] }]}>
+        <Image
+          source={{ uri: item.uri }}
+          style={styles.galleryImage}
+          resizeMode="contain"
+          onError={onPreviewError}
+        />
+      </View>
+      {scale > 1.02 ? (
+        <Pressable style={styles.zoomResetButton} onPress={() => {
+          setScale(1);
+          setTranslate({ x: 0, y: 0 });
+        }}>
+          <Text style={styles.zoomResetText}>还原</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function InlineVideoPlayer({
+  item,
+  onZoomActiveChange,
+}: {
+  item: GalleryMedia;
+  onZoomActiveChange?: (active: boolean) => void;
+}) {
+  if (NativeDualViewVideoView == null) {
+    return <MediaPreviewFallback item={item} />;
+  }
+  return (
+    <View
+      style={styles.inlineVideoPlayer}
+      onTouchStart={event => {
+        if (event.nativeEvent.touches.length >= 2) {
+          onZoomActiveChange?.(true);
+        }
+      }}
+      onTouchMove={event => {
+        if (event.nativeEvent.touches.length >= 2) {
+          onZoomActiveChange?.(true);
+        }
+      }}
+      onTouchEnd={event => {
+        if (event.nativeEvent.touches.length < 2) {
+          onZoomActiveChange?.(false);
+        }
+      }}
+      onTouchCancel={() => onZoomActiveChange?.(false)}
+    >
+      <NativeDualViewVideoView style={styles.inlineVideoPlayer} sourceUri={item.uri} />
+    </View>
   );
 }
 
@@ -1779,6 +2001,49 @@ function formatBytes(bytes: number | null): string {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
+function touchDistance(touches: ReadonlyArray<{ pageX: number; pageY: number }>): number | null {
+  if (touches.length < 2) return null;
+  const first = touches[0];
+  const second = touches[1];
+  return Math.hypot(first.pageX - second.pageX, first.pageY - second.pageY);
+}
+function touchCenter(touches: ReadonlyArray<{ locationX: number; locationY: number }>): { x: number; y: number } | null {
+  if (touches.length < 2) return null;
+  const first = touches[0];
+  const second = touches[1];
+  return {
+    x: (first.locationX + second.locationX) / 2,
+    y: (first.locationY + second.locationY) / 2,
+  };
+}
+function containedMediaFrame(containerWidth: number, containerHeight: number, mediaWidth: number, mediaHeight: number): { width: number; height: number } {
+  if (containerWidth <= 0 || containerHeight <= 0 || mediaWidth <= 0 || mediaHeight <= 0) {
+    return { width: containerWidth, height: containerHeight };
+  }
+  const containerRatio = containerWidth / containerHeight;
+  const mediaRatio = mediaWidth / mediaHeight;
+  if (mediaRatio > containerRatio) {
+    return { width: containerWidth, height: containerWidth / mediaRatio };
+  }
+  return { width: containerHeight * mediaRatio, height: containerHeight };
+}
+function clampPointToMediaRect(point: { x: number; y: number }, container: { width: number; height: number }, frame: { width: number; height: number }): { x: number; y: number } {
+  const left = (container.width - frame.width) / 2;
+  const top = (container.height - frame.height) / 2;
+  return {
+    x: clamp(point.x, left, left + frame.width),
+    y: clamp(point.y, top, top + frame.height),
+  };
+}
+function clampPhotoTranslate(translate: { x: number; y: number }, scale: number, size: { width: number; height: number }, frame: { width: number; height: number }): { x: number; y: number } {
+  if (scale <= 1.02 || size.width <= 0 || size.height <= 0) return { x: 0, y: 0 };
+  const maxX = Math.max(0, (frame.width * scale - size.width) / 2);
+  const maxY = Math.max(0, (frame.height * scale - size.height) / 2);
+  return {
+    x: clamp(translate.x, -maxX, maxX),
+    y: clamp(translate.y, -maxY, maxY),
+  };
+}
 function calculateContainedFrame(containerWidth: number, containerHeight: number, aspectRatio?: number): { width: any; height: any } {
   if (containerWidth <= 0 || containerHeight <= 0 || aspectRatio == null) {
     return { width: '100%', height: '100%' };
@@ -1938,6 +2203,11 @@ const styles = StyleSheet.create({
   galleryPage: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
   galleryLazyPage: { flex: 1, backgroundColor: '#000' },
   galleryImage: { width: '100%', height: '100%' },
+  zoomablePhoto: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  zoomableImageFrame: { alignItems: 'center', justifyContent: 'center' },
+  zoomResetButton: { position: 'absolute', right: 18, top: TOP_BAR_OFFSET + 42, minWidth: 52, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)' },
+  zoomResetText: { color: COLORS.text, fontSize: 12, fontWeight: '900' },
+  inlineVideoPlayer: { width: '100%', height: '100%', backgroundColor: '#000' },
   galleryEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   galleryEmptyText: { color: COLORS.muted, fontSize: 14, fontWeight: '700' },
   mediaPreviewFallback: { minWidth: 210, minHeight: 180, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, backgroundColor: 'rgba(255,255,255,0.08)' },

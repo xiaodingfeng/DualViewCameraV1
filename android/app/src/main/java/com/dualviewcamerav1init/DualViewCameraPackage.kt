@@ -11,7 +11,7 @@ class DualViewCameraPackage : ReactPackage {
   }
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
-      return listOf(SharedTextureViewManager())
+      return listOf(SharedTextureViewManager(), DualViewVideoViewManager())
   }
 
 }
