@@ -78,6 +78,7 @@ const COLORS = {
 
 const TOP_BAR_OFFSET = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) + 12 : 50;
 const PREVIEW_TOP_OFFSET = Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 0;
+const LANDSCAPE_MAIN_BOTTOM_OFFSET = 148;
 const ZOOM_BAR_WIDTH = 280;
 const PX_PER_ZOOM = 120; 
 const SETTINGS_PATH = `${RNFS.DocumentDirectoryPath}/dual-view-camera-settings.json`;
@@ -292,29 +293,26 @@ function CameraShell({
     ? previewSize.width / Math.max(1, previewSize.height)
     : 9 / 16;
   const mainFrameSpec = useMemo(
-    () => visibleFrameSpec(captureMode, mainDisplayOrientation, selectedAspect, fullMainAspect),
-    [captureMode, fullMainAspect, mainDisplayOrientation, selectedAspect],
+    () => visibleFrameSpec(mainDisplayOrientation, selectedAspect, fullMainAspect),
+    [fullMainAspect, mainDisplayOrientation, selectedAspect],
   );
   const subFrameSpec = useMemo(
-    () => visibleFrameSpec(captureMode, subDisplayOrientation, selectedAspect, 3 / 4),
-    [captureMode, selectedAspect, subDisplayOrientation],
+    () => visibleFrameSpec(subDisplayOrientation, selectedAspect, 3 / 4),
+    [selectedAspect, subDisplayOrientation],
   );
-  const isFullPreview = captureMode === 'photo' && selectedAspectId === 'full' && mainDisplayOrientation === 'portrait';
+  const isFullPreview = selectedAspectId === 'full' && mainDisplayOrientation === 'portrait';
   const mainPreviewAspect = mainFrameSpec.aspect;
   const previewTopOffset = isFullPreview ? 0 : PREVIEW_TOP_OFFSET;
+  const mainPreviewBottomOffset = !isFullPreview && mainDisplayOrientation === 'landscape' ? LANDSCAPE_MAIN_BOTTOM_OFFSET : 0;
   const mainPreviewFrame = useMemo(
-    () => calculateContainedFrame(previewSize.width, Math.max(0, previewSize.height - previewTopOffset), mainPreviewAspect),
-    [mainPreviewAspect, previewSize.height, previewSize.width, previewTopOffset],
+    () => calculateContainedFrame(previewSize.width, Math.max(0, previewSize.height - previewTopOffset - mainPreviewBottomOffset), mainPreviewAspect),
+    [mainPreviewAspect, mainPreviewBottomOffset, previewSize.height, previewSize.width, previewTopOffset],
   );
   const videoFpsOptions = useMemo<VideoFps[]>(() => {
     const supports60 = safeSupportsFPS(device, 60);
     return supports60 ? [30, 60] : [30];
   }, [device]);
-  const videoFrameSize = useCallback((spec: VisibleFrameSpec) => {
-    return spec.aspect > 1
-      ? videoQualityConfig.landscape
-      : videoQualityConfig.portrait;
-  }, [videoQualityConfig.landscape, videoQualityConfig.portrait]);
+  const videoFrameSize = useCallback((spec: VisibleFrameSpec) => videoTargetSizeForAspect(spec.aspect, videoQualityConfig), [videoQualityConfig]);
 
   const outputs = useMemo(() => {
     if (captureMode === 'photo') {
@@ -727,6 +725,7 @@ function CameraShell({
             orientation={mainDisplayOrientation}
             aspectRatio={mainPreviewAspect}
             frame={mainPreviewFrame}
+            bottomOffset={mainPreviewBottomOffset}
             topOffset={previewTopOffset}
             fillScreen={isFullPreview}
             previewOutput={mainPreviewOutput}
@@ -889,12 +888,21 @@ function TopBar({
           <Text style={styles.recordingTime}>{formatDuration(recordingSeconds)}</Text>
         ) : captureMode === 'video' ? (
           <View style={styles.topVideoControls}>
-            <Pressable style={styles.topPill} onPress={() => onVideoFpsChange(nextFps(videoFps, videoFpsOptions))}>
-              <Text style={styles.topPillText}>{videoFps}HZ</Text>
-            </Pressable>
-            <Pressable style={styles.topPill} onPress={() => onVideoQualityChange(nextVideoQuality(videoQuality))}>
-              <Text style={styles.topPillText}>{VIDEO_QUALITY_CONFIG[videoQuality].label}</Text>
-            </Pressable>
+            <View style={styles.topVideoPills}>
+              <Pressable style={styles.topPill} onPress={() => onVideoFpsChange(nextFps(videoFps, videoFpsOptions))}>
+                <Text style={styles.topPillText}>{videoFps}HZ</Text>
+              </Pressable>
+              <Pressable style={styles.topPill} onPress={() => onVideoQualityChange(nextVideoQuality(videoQuality))}>
+                <Text style={styles.topPillText}>{VIDEO_QUALITY_CONFIG[videoQuality].label}</Text>
+              </Pressable>
+            </View>
+            <View style={styles.aspectRow}>
+              {aspectOptions.map(option => (
+                <Pressable key={option.id} style={[styles.aspectButton, aspectId === option.id && styles.aspectButtonActive]} onPress={() => onAspectChange(option.id)}>
+                  <Text style={[styles.aspectText, aspectId === option.id && styles.aspectTextActive]}>{option.label}</Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
         ) : (
           <View style={styles.aspectRow}>
@@ -956,6 +964,7 @@ function PipPreview({ aspectRatio, isSwapped, orientation, onPress, previewOutpu
 }
 
 function MainPreview({
+  bottomOffset,
   fillScreen,
   frame,
   hybridRef,
@@ -966,6 +975,7 @@ function MainPreview({
   topOffset,
 }: {
   fillScreen: boolean;
+  bottomOffset: number;
   frame: { width: any; height: any };
   hybridRef: unknown;
   orientation: FrameOrientation;
@@ -975,8 +985,8 @@ function MainPreview({
   topOffset: number;
 }) {
   const centerStyle = useMemo(
-    () => [styles.mainPreviewCenter, { top: topOffset }],
-    [topOffset],
+    () => [styles.mainPreviewCenter, { top: topOffset, bottom: bottomOffset }],
+    [bottomOffset, topOffset],
   );
   const slotStyle = useMemo(() => {
     if (fillScreen) {
@@ -1203,12 +1213,31 @@ async function createVideoVariant(filePath: string, variant: PhotoVariant, suffi
 }
 function slugify(v: string): string { return v.replace(/[^\w-]+/g, '_') || 'media'; }
 function wait(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
-function visibleFrameSpec(captureMode: CaptureMode, orientation: FrameOrientation, selectedAspect: typeof ASPECT_RATIOS[number], fullPortraitAspect: number): VisibleFrameSpec {
+function visibleFrameSpec(orientation: FrameOrientation, selectedAspect: typeof ASPECT_RATIOS[number], fullPortraitAspect: number): VisibleFrameSpec {
   if (orientation === 'landscape') return { aspect: 16 / 9, variant: 'landscape' };
-  if (captureMode === 'video') return { aspect: 9 / 16, variant: 'video16x9' };
   if (selectedAspect.id === 'full') return { aspect: fullPortraitAspect, variant: 'full' };
   if (selectedAspect.id === '16:9') return { aspect: 9 / 16, variant: 'video16x9' };
   return { aspect: selectedAspect.previewAspect ?? 3 / 4, variant: selectedAspect.photoVariant };
+}
+function videoTargetSizeForAspect(aspectRatio: number, quality: (typeof VIDEO_QUALITY_CONFIG)[VideoQuality]): { width: number; height: number } {
+  const targetLongEdge = aspectRatio >= 1 ? quality.landscape.width : quality.portrait.height;
+  if (Math.abs(aspectRatio - 1) < 0.01) {
+    const size = evenDimension(targetLongEdge);
+    return { width: size, height: size };
+  }
+  if (aspectRatio >= 1) {
+    return {
+      width: evenDimension(targetLongEdge),
+      height: evenDimension(targetLongEdge / aspectRatio),
+    };
+  }
+  return {
+    width: evenDimension(targetLongEdge * aspectRatio),
+    height: evenDimension(targetLongEdge),
+  };
+}
+function evenDimension(value: number): number {
+  return Math.max(2, Math.round(value / 2) * 2);
 }
 function pipFrameSize(aspectRatio: number): { width: number; height: number } {
   if (Math.abs(aspectRatio - 1) < 0.01) {
@@ -1306,7 +1335,7 @@ const styles = StyleSheet.create({
   previewStatus: { position: 'absolute', left: 22, right: 22, top: '40%', zIndex: 12, padding: 14, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.62)', borderWidth: 1, borderColor: COLORS.line },
   previewStatusTitle: { color: COLORS.text, fontSize: 15, fontWeight: '900', marginBottom: 6, textAlign: 'center' },
   previewStatusText: { color: COLORS.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
-  mainPreviewCenter: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
+  mainPreviewCenter: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
   mainContainedSlot: { backgroundColor: '#000', overflow: 'hidden' },
   mainPortraitSlot: { height: '100%', aspectRatio: 3 / 4, backgroundColor: '#000', overflow: 'hidden' },
   mainFullSlot: { width: '100%', height: '100%' },
@@ -1321,7 +1350,8 @@ const styles = StyleSheet.create({
   aspectButtonActive: { backgroundColor: 'rgba(255,209,102,0.22)' },
   aspectText: { color: COLORS.muted, fontSize: 11, fontWeight: '900' },
   aspectTextActive: { color: COLORS.text },
-  topVideoControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  topVideoControls: { alignItems: 'center', justifyContent: 'center', gap: 6 },
+  topVideoPills: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   topPill: { minWidth: 58, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, backgroundColor: 'rgba(0,0,0,0.46)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)' },
   topPillText: { color: COLORS.text, fontSize: 12, fontWeight: '900' },
   recordingTime: { minWidth: 68, textAlign: 'center', color: COLORS.text, fontSize: 15, fontWeight: '900', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 17, backgroundColor: 'rgba(255,59,48,0.78)' },
