@@ -44,6 +44,7 @@
 - [x] 双画面录像接入原生 Media3 Transformer，按主/副构图生成对应方向的视频变体。
 - [x] 按联网资料验证后的可行方案调整构图：单个同源相机不能获得超过传感器有效区域的额外视野，双画面改为主画面 3:4、横向副画面 16:9 从同源 4:3 输出中裁切。
 - [x] 修复后台切回前台画面冻结：接入 `AppState` 控制相机 `isActive`，回到前台时刷新预览 Session revision 并重新挂载预览视图。
+- [x] 优化拍照/录像期间 PiP 副画面占位：明确提示副画面会按保存构图输出，避免误解为黑屏异常。
 - [x] 完成本地 TypeScript/Android 构建验证，USB 设备安装运行。
 - [x] 更新文档进度与交付说明。
 
@@ -63,6 +64,7 @@
 - 双画面拍照通过原生 `DualViewMedia` 模块生成主/副两张不同构图照片：竖向主画面输出 3:4，横向副画面从原始传感器方向裁切 16:9。
 - 双画面预览态使用两个原生 `PreviewOutput`：主画面全屏预览，PiP 副画面实时预览。按下拍照时临时切换到 `Preview + ImageCapture` 管线完成拍摄，避免同时绑定两个预览和拍照。
 - 录像待机时保留双预览；按下录像时临时切换到 `Preview + VideoCapture` 管线，录像停止后恢复双预览，避免 CameraX surface combination 错误。
+- 拍照/录像管线切换期间，PiP 副画面显示“拍照中/录制中，副画面按保存构图输出”的占位提示，不再只显示黑屏占位。
 - Android Studio 直接运行 `debug` 变体时会先打包 JS 到 APK，因此不会再出现未启动 Metro 导致的 `Unable to load script`；代价是 JS 改动需要重新 Run/Build 才会进入 APK。
 - 若需要 Metro 热更新，可手动启动 Metro 并使用 React Native CLI 调试链路，但当前默认优先保证 Android Studio 直接运行。
 - 主画面照片和副画面照片都按照当前可见预览方向输出：竖屏画面输出 3:4，横屏画面输出 16:9。

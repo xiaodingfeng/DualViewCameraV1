@@ -569,11 +569,9 @@ function CameraShell({
           saveToGallery(mainPath, 'photo', '主画面'),
           saveToGallery(subPath, 'photo', '副画面'),
         ]);
-        setToast('拍照成功，已保存 2 个文件');
       } else {
         const mainPath = await createPhotoVariantForAspect(file.filePath, mainFrameSpec, 'main');
         await saveToGallery(mainPath, 'photo', '主画面');
-        setToast('拍照成功');
       }
     } catch (error) {
       setToast(cameraErrorMessage(error, '拍照失败'));
@@ -602,7 +600,6 @@ function CameraShell({
         const subPath = await createVideoVariant(filePath, subVariant, 'sub', videoFrameSize(subFrameSpec));
         await saveToGallery(subPath, 'video', '副画面');
       }
-      setToast('录像已保存');
     } catch (error) {
       setToast('录像保存失败');
     }
@@ -767,7 +764,13 @@ function CameraShell({
                   : (isRecording || pendingVideoStart ? null : pipPreviewOutput)
               }
               sessionRevision={sessionRevision}
-              isRecording={isRecording && captureMode === 'video'}
+              placeholderMode={
+                captureMode === 'photo' && pendingPhotoCapture
+                  ? 'photo'
+                  : captureMode === 'video' && (isRecording || pendingVideoStart)
+                    ? 'video'
+                    : null
+              }
             />
           )}
           {toast ? <Toast message={toast} /> : null}
@@ -951,18 +954,26 @@ function BottomControls({ captureMode, isBusy, isRecording, lastMedia, onCapture
   );
 }
 
-function PipPreview({ aspectRatio, isSwapped, orientation, onPress, previewOutput, sessionRevision, isRecording }: { aspectRatio: number; isSwapped: boolean; orientation: FrameOrientation; onPress: () => void; previewOutput: any | null; sessionRevision: number; isRecording: boolean }) {
+function PipPreview({ aspectRatio, isSwapped, orientation, onPress, previewOutput, sessionRevision, placeholderMode }: { aspectRatio: number; isSwapped: boolean; orientation: FrameOrientation; onPress: () => void; previewOutput: any | null; sessionRevision: number; placeholderMode: 'photo' | 'video' | null }) {
   const pipSize = useMemo(() => pipFrameSize(aspectRatio), [aspectRatio]);
+  const placeholderTitle = placeholderMode === 'photo' ? '拍照中' : '录制中';
   return (
     <View style={[styles.pip, pipSize]}>
        {previewOutput ? (
          <NativePreviewView key={`pip-${sessionRevision}`} style={StyleSheet.absoluteFill} previewOutput={previewOutput} resizeMode="cover" implementationMode="compatible" />
        ) : (
          <View style={styles.pipPlaceholder}>
-           <Text style={styles.pipPlaceholderText}>{isRecording ? '录制中' : '副画面'}</Text>
+           {placeholderMode ? (
+             <>
+               <Text style={styles.pipPlaceholderTitle}>{placeholderTitle}</Text>
+               <Text style={styles.pipPlaceholderText}>副画面按保存构图输出</Text>
+             </>
+           ) : (
+             <Text style={styles.pipPlaceholderText}>副画面</Text>
+           )}
          </View>
        )}
-       <Text style={styles.pipLabel}>{isRecording ? '录制中' : (isSwapped ? '主画面' : `副 ${formatAspectLabel(aspectRatio)}`)}</Text>
+       <Text style={styles.pipLabel}>{placeholderMode ? placeholderTitle : (isSwapped ? '主画面' : `副 ${formatAspectLabel(aspectRatio)}`)}</Text>
        <Pressable style={styles.pipTouchLayer} onPress={onPress} />
     </View>
   );
@@ -1367,8 +1378,9 @@ const styles = StyleSheet.create({
   pip: { position: 'absolute', left: 18, bottom: 228, zIndex: 18, overflow: 'hidden', borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: '#000' },
   pipLabel: { position: 'absolute', left: 6, bottom: 5, color: COLORS.text, fontSize: 10, fontWeight: '800', textShadowColor: '#000', textShadowRadius: 3 },
   pipTouchLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 2 },
-  pipPlaceholder: { flex: 1, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
-  pipPlaceholderText: { color: COLORS.muted, fontSize: 12, fontWeight: '800' },
+  pipPlaceholder: { flex: 1, backgroundColor: 'rgba(10,10,10,0.92)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  pipPlaceholderTitle: { color: COLORS.text, fontSize: 13, fontWeight: '900', marginBottom: 5, textAlign: 'center' },
+  pipPlaceholderText: { color: COLORS.muted, fontSize: 11, fontWeight: '800', lineHeight: 15, textAlign: 'center' },
   zoomBarContainer: { position: 'absolute', left: 0, right: 0, bottom: 180, alignItems: 'center', zIndex: 25 },
   zoomBarShell: { width: ZOOM_BAR_WIDTH, height: 38, backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 19, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   optionsRow: { flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'space-evenly' },
