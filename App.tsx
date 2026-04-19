@@ -247,7 +247,7 @@ function CameraShell({
   const pipPreviewOutput = usePreviewOutput();
   const photoOutput = usePhotoOutput({
     targetResolution: CommonResolutions.UHD_4_3,
-    containerFormat: photoFormat,
+    containerFormat: 'jpeg',
     quality: photoQualityConfig.quality,
     qualityPrioritization: photoQualityConfig.priority === 'speed' && !device.supportsSpeedQualityPrioritization
       ? 'balanced'

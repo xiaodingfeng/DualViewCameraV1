@@ -68,7 +68,7 @@
 - 录像待机时保留双预览；按下录像时临时切换到 `Preview + VideoCapture` 管线，录像停止后恢复双预览，避免 CameraX surface combination 错误。
 - 拍照/录像管线切换期间，PiP 副画面显示“拍照中/录制中，副画面按保存构图输出”的占位提示，不再只显示黑屏占位。
 - 拍照保存不再阻塞快门完成后的 UI 恢复；照片裁剪、双文件生成与 CameraRoll 入库在后台执行，失败时只保留错误提示。
-- 拍照设置支持 JPG/HEIF；HEIF 使用 AndroidX HeifWriter 输出，Android 9 以下设备会回退为 JPG。录像设置支持 HEVC/H.264，作用于最终保存的主/副构图视频转码输出。
+- 拍照设置支持 JPG/HEIF；底层相机捕获固定使用 JPEG 临时源以避免切换格式导致 PhotoOutput 重新挂载失败，最终主/副保存文件按设置输出 JPG 或 HEIF。HEIF 使用 AndroidX HeifWriter 输出，Android 9 以下设备会回退为 JPG。录像设置支持 HEVC/H.264，作用于最终保存的主/副构图视频转码输出。
 - Android Studio 直接运行 `debug` 变体时会先打包 JS 到 APK，因此不会再出现未启动 Metro 导致的 `Unable to load script`；代价是 JS 改动需要重新 Run/Build 才会进入 APK。
 - 若需要 Metro 热更新，可手动启动 Metro 并使用 React Native CLI 调试链路，但当前默认优先保证 Android Studio 直接运行。
 - 主画面照片和副画面照片都按照当前可见预览方向输出：竖屏画面输出 3:4，横屏画面输出 16:9。
