@@ -56,6 +56,7 @@ type VideoQuality = '720' | '1080' | '4K' | '8K';
 type VideoFps = 30 | 60;
 type SettingsTab = 'photo' | 'video';
 type PhotoVariant = 'full' | 'portrait' | 'landscape' | 'square' | 'photo4x3' | 'video16x9';
+type VisibleFrameSpec = { aspect: number; variant: PhotoVariant };
 type PersistedSettings = Partial<{
   selectedAspectId: AspectRatioId;
   photoQuality: PhotoQuality;
@@ -95,15 +96,16 @@ const PHOTO_QUALITY_CONFIG: Record<PhotoQuality, { label: string; quality: numbe
 };
 
 const VIDEO_QUALITY_CONFIG: Record<VideoQuality, { label: string; resolution: { width: number; height: number }; landscape: { width: number; height: number }; portrait: { width: number; height: number } }> = {
-  '720': { label: '720', resolution: CommonResolutions.HD_16_9, landscape: { width: 1280, height: 720 }, portrait: { width: 720, height: 960 } },
-  '1080': { label: '1080', resolution: CommonResolutions.FHD_16_9, landscape: { width: 1920, height: 1080 }, portrait: { width: 1080, height: 1440 } },
-  '4K': { label: '4K', resolution: CommonResolutions.UHD_16_9, landscape: { width: 3840, height: 2160 }, portrait: { width: 2160, height: 2880 } },
-  '8K': { label: '8K', resolution: CommonResolutions['8k_16_9'], landscape: { width: 8064, height: 4536 }, portrait: { width: 6048, height: 8064 } },
+  '720': { label: '720', resolution: CommonResolutions.HD_16_9, landscape: { width: 1280, height: 720 }, portrait: { width: 720, height: 1280 } },
+  '1080': { label: '1080', resolution: CommonResolutions.FHD_16_9, landscape: { width: 1920, height: 1080 }, portrait: { width: 1080, height: 1920 } },
+  '4K': { label: '4K', resolution: CommonResolutions.UHD_16_9, landscape: { width: 3840, height: 2160 }, portrait: { width: 2160, height: 3840 } },
+  '8K': { label: '8K', resolution: CommonResolutions['8k_16_9'], landscape: { width: 8064, height: 4536 }, portrait: { width: 4536, height: 8064 } },
 };
 
 const { DualViewMedia } = NativeModules as {
   DualViewMedia?: {
     createPhotoVariant(sourcePath: string, variant: PhotoVariant, suffix: string): Promise<string>;
+    createPhotoVariantWithAspect?(sourcePath: string, suffix: string, aspectWidth: number, aspectHeight: number): Promise<string>;
     createVideoVariant?(sourcePath: string, variant: PhotoVariant, suffix: string, width: number, height: number): Promise<string>;
   };
 };
@@ -286,10 +288,19 @@ function CameraShell({
   const defaultSubOrientation: FrameOrientation = isDeviceLandscape ? 'portrait' : 'landscape';
   const mainDisplayOrientation: FrameOrientation = viewMode === 'dual' && isSwapped ? defaultSubOrientation : 'portrait';
   const subDisplayOrientation: FrameOrientation = viewMode === 'dual' && isSwapped ? 'portrait' : defaultSubOrientation;
-  const isFullPreview = captureMode === 'photo' && selectedAspectId === 'full';
-  const mainPreviewAspect = captureMode === 'video'
-    ? 9 / 16
-    : (mainDisplayOrientation === 'landscape' ? 16 / 9 : selectedAspect.previewAspect);
+  const fullMainAspect = previewSize.width > 0 && previewSize.height > 0
+    ? previewSize.width / Math.max(1, previewSize.height)
+    : 9 / 16;
+  const mainFrameSpec = useMemo(
+    () => visibleFrameSpec(captureMode, mainDisplayOrientation, selectedAspect, fullMainAspect),
+    [captureMode, fullMainAspect, mainDisplayOrientation, selectedAspect],
+  );
+  const subFrameSpec = useMemo(
+    () => visibleFrameSpec(captureMode, subDisplayOrientation, selectedAspect, 3 / 4),
+    [captureMode, selectedAspect, subDisplayOrientation],
+  );
+  const isFullPreview = captureMode === 'photo' && selectedAspectId === 'full' && mainDisplayOrientation === 'portrait';
+  const mainPreviewAspect = mainFrameSpec.aspect;
   const previewTopOffset = isFullPreview ? 0 : PREVIEW_TOP_OFFSET;
   const mainPreviewFrame = useMemo(
     () => calculateContainedFrame(previewSize.width, Math.max(0, previewSize.height - previewTopOffset), mainPreviewAspect),
@@ -299,12 +310,8 @@ function CameraShell({
     const supports60 = safeSupportsFPS(device, 60);
     return supports60 ? [30, 60] : [30];
   }, [device]);
-  const mainPhotoVariant = viewMode === 'dual'
-    ? frameVariant(mainDisplayOrientation, selectedAspect.photoVariant)
-    : selectedAspect.photoVariant;
-  const subPhotoVariant = frameVariant(subDisplayOrientation, selectedAspect.photoVariant);
-  const videoVariantSize = useCallback((variant: PhotoVariant) => {
-    return variant === 'landscape' || variant === 'video16x9'
+  const videoFrameSize = useCallback((spec: VisibleFrameSpec) => {
+    return spec.aspect > 1
       ? videoQualityConfig.landscape
       : videoQualityConfig.portrait;
   }, [videoQualityConfig.landscape, videoQualityConfig.portrait]);
@@ -556,13 +563,13 @@ function CameraShell({
          enableShutterSound: true,
       }, {});
       if (viewMode === 'dual' && saveDualOutputs) {
-        const mainPath = await createPhotoVariant(file.filePath, mainPhotoVariant, 'main');
-        const subPath = await createPhotoVariant(file.filePath, subPhotoVariant, 'sub');
+        const mainPath = await createPhotoVariantForAspect(file.filePath, mainFrameSpec, 'main');
+        const subPath = await createPhotoVariantForAspect(file.filePath, subFrameSpec, 'sub');
         await saveToGallery(mainPath, 'photo', '主画面');
         await saveToGallery(subPath, 'photo', '副画面');
         setToast('拍照成功，已保存 2 个文件');
       } else {
-        const mainPath = await createPhotoVariant(file.filePath, mainPhotoVariant, 'main');
+        const mainPath = await createPhotoVariantForAspect(file.filePath, mainFrameSpec, 'main');
         await saveToGallery(mainPath, 'photo', '主画面');
         setToast('拍照成功');
       }
@@ -573,7 +580,7 @@ function CameraShell({
       setIsBusy(false);
       setPendingPhotoCapture(false);
     }
-  }, [captureMode, cleanupFlashAfterPhoto, device?.hasFlash, flashMode, isBusy, mainPhotoVariant, pendingPhotoCapture, photoOutput, prepareFlashForPhoto, saveDualOutputs, saveToGallery, subPhotoVariant, viewMode]);
+  }, [captureMode, cleanupFlashAfterPhoto, device?.hasFlash, flashMode, isBusy, mainFrameSpec, pendingPhotoCapture, photoOutput, prepareFlashForPhoto, saveDualOutputs, saveToGallery, subFrameSpec, viewMode]);
 
   useEffect(() => {
     if (!pendingPhotoCapture) return;
@@ -585,21 +592,19 @@ function CameraShell({
 
   const finishRecording = useCallback(async (filePath: string) => {
     try {
-      const mainVariant = viewMode === 'dual'
-        ? frameVariant(mainDisplayOrientation, selectedAspect.photoVariant)
-        : selectedAspect.photoVariant;
-      const mainPath = await createVideoVariant(filePath, mainVariant, 'main', videoVariantSize(mainVariant));
+      const mainVariant = mainFrameSpec.variant;
+      const mainPath = await createVideoVariant(filePath, mainVariant, 'main', videoFrameSize(mainFrameSpec));
       await saveToGallery(mainPath, 'video', '主画面');
       if (viewMode === 'dual' && saveDualOutputs) {
-        const subVariant = frameVariant(subDisplayOrientation, selectedAspect.photoVariant);
-        const subPath = await createVideoVariant(filePath, subVariant, 'sub', videoVariantSize(subVariant));
+        const subVariant = subFrameSpec.variant;
+        const subPath = await createVideoVariant(filePath, subVariant, 'sub', videoFrameSize(subFrameSpec));
         await saveToGallery(subPath, 'video', '副画面');
       }
       setToast('录像已保存');
     } catch (error) {
       setToast('录像保存失败');
     }
-  }, [mainDisplayOrientation, saveDualOutputs, saveToGallery, selectedAspect.photoVariant, subDisplayOrientation, videoVariantSize, viewMode]);
+  }, [mainFrameSpec, saveDualOutputs, saveToGallery, subFrameSpec, videoFrameSize, viewMode]);
 
   const toggleRecording = useCallback(async () => {
     if (isBusy || captureMode !== 'video') return;
@@ -748,6 +753,7 @@ function CameraShell({
           />
           {viewMode === 'dual' && (
             <PipPreview
+              aspectRatio={subFrameSpec.aspect}
               isSwapped={isSwapped}
               orientation={subDisplayOrientation}
               onPress={swapMainAndSub}
@@ -932,10 +938,10 @@ function BottomControls({ captureMode, isBusy, isRecording, lastMedia, onCapture
   );
 }
 
-function PipPreview({ isSwapped, orientation, onPress, previewOutput, sessionRevision, isRecording }: { isSwapped: boolean; orientation: FrameOrientation; onPress: () => void; previewOutput: any | null; sessionRevision: number; isRecording: boolean }) {
-  const isLandscape = orientation === 'landscape';
+function PipPreview({ aspectRatio, isSwapped, orientation, onPress, previewOutput, sessionRevision, isRecording }: { aspectRatio: number; isSwapped: boolean; orientation: FrameOrientation; onPress: () => void; previewOutput: any | null; sessionRevision: number; isRecording: boolean }) {
+  const pipSize = useMemo(() => pipFrameSize(aspectRatio), [aspectRatio]);
   return (
-    <View style={[styles.pip, isLandscape ? styles.pipLandscape : styles.pipPortrait]}>
+    <View style={[styles.pip, pipSize]}>
        {previewOutput ? (
          <NativePreviewView key={`pip-${sessionRevision}`} style={StyleSheet.absoluteFill} previewOutput={previewOutput} resizeMode="cover" implementationMode="compatible" />
        ) : (
@@ -943,7 +949,7 @@ function PipPreview({ isSwapped, orientation, onPress, previewOutput, sessionRev
            <Text style={styles.pipPlaceholderText}>{isRecording ? '录制中' : '副画面'}</Text>
          </View>
        )}
-       <Text style={styles.pipLabel}>{isRecording ? '录制中' : (isSwapped ? '主画面' : (isLandscape ? '副 16:9' : '副 3:4'))}</Text>
+       <Text style={styles.pipLabel}>{isRecording ? '录制中' : (isSwapped ? '主画面' : `副 ${formatAspectLabel(aspectRatio)}`)}</Text>
        <Pressable style={styles.pipTouchLayer} onPress={onPress} />
     </View>
   );
@@ -1180,16 +1186,44 @@ async function createPhotoVariant(filePath: string, variant: PhotoVariant, suffi
   if (variant === 'full' || !DualViewMedia?.createPhotoVariant) return toLocalPath(filePath);
   return DualViewMedia.createPhotoVariant(toLocalPath(filePath), variant, slugify(suffix));
 }
+async function createPhotoVariantForAspect(filePath: string, spec: VisibleFrameSpec, suffix: string): Promise<string> {
+  if (DualViewMedia?.createPhotoVariantWithAspect) {
+    return DualViewMedia.createPhotoVariantWithAspect(
+      toLocalPath(filePath),
+      slugify(`${suffix}_${spec.variant}`),
+      Math.round(spec.aspect * 10000),
+      10000,
+    );
+  }
+  return createPhotoVariant(filePath, spec.variant, suffix);
+}
 async function createVideoVariant(filePath: string, variant: PhotoVariant, suffix: string, targetSize: { width: number; height: number }): Promise<string> {
   if (!DualViewMedia?.createVideoVariant) return toLocalPath(filePath);
   return DualViewMedia.createVideoVariant(toLocalPath(filePath), variant, slugify(suffix), targetSize.width, targetSize.height);
 }
 function slugify(v: string): string { return v.replace(/[^\w-]+/g, '_') || 'media'; }
 function wait(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
-function frameVariant(orientation: FrameOrientation, selectedVariant: PhotoVariant): PhotoVariant {
-  if (orientation === 'landscape') return 'landscape';
-  if (selectedVariant === 'landscape' || selectedVariant === 'video16x9') return 'portrait';
-  return selectedVariant === 'full' ? 'portrait' : selectedVariant;
+function visibleFrameSpec(captureMode: CaptureMode, orientation: FrameOrientation, selectedAspect: typeof ASPECT_RATIOS[number], fullPortraitAspect: number): VisibleFrameSpec {
+  if (orientation === 'landscape') return { aspect: 16 / 9, variant: 'landscape' };
+  if (captureMode === 'video') return { aspect: 9 / 16, variant: 'video16x9' };
+  if (selectedAspect.id === 'full') return { aspect: fullPortraitAspect, variant: 'full' };
+  if (selectedAspect.id === '16:9') return { aspect: 9 / 16, variant: 'video16x9' };
+  return { aspect: selectedAspect.previewAspect ?? 3 / 4, variant: selectedAspect.photoVariant };
+}
+function pipFrameSize(aspectRatio: number): { width: number; height: number } {
+  if (Math.abs(aspectRatio - 1) < 0.01) {
+    return { width: 154, height: 154 };
+  }
+  if (aspectRatio >= 1) {
+    return { width: 192, height: Math.round(192 / aspectRatio) };
+  }
+  return { width: Math.round(168 * aspectRatio), height: 168 };
+}
+function formatAspectLabel(aspectRatio: number): string {
+  if (Math.abs(aspectRatio - 1) < 0.01) return '1:1';
+  if (Math.abs(aspectRatio - 16 / 9) < 0.02 || Math.abs(aspectRatio - 9 / 16) < 0.02) return '16:9';
+  if (Math.abs(aspectRatio - 3 / 4) < 0.02) return '3:4';
+  return '全屏';
 }
 function safeSupportsFPS(device: CameraDevice, fps: VideoFps): boolean {
   try {
@@ -1295,9 +1329,7 @@ const styles = StyleSheet.create({
   roundButtonActive: { backgroundColor: 'rgba(255,209,102,0.18)', opacity: 0.88 },
   roundButtonText: { color: COLORS.text, fontSize: 14, fontWeight: '800' },
   noBorderButton: { backgroundColor: 'transparent', borderWidth: 0, minWidth: 42 },
-  pip: { position: 'absolute', left: 18, bottom: 228, zIndex: 18, overflow: 'hidden', borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: '#000' },
-  pipLandscape: { width: 190, height: 110, borderRadius: 16 },
-  pipPortrait: { width: 126, height: 168, borderRadius: 16 },
+  pip: { position: 'absolute', left: 18, bottom: 228, zIndex: 18, overflow: 'hidden', borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: '#000' },
   pipLabel: { position: 'absolute', left: 6, bottom: 5, color: COLORS.text, fontSize: 10, fontWeight: '800', textShadowColor: '#000', textShadowRadius: 3 },
   pipTouchLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 2 },
   pipPlaceholder: { flex: 1, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },

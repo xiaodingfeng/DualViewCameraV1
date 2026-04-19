@@ -37,6 +37,17 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun createPhotoVariant(sourcePath: String, variant: String, suffix: String, promise: Promise) {
+    createPhotoVariantInternal(sourcePath, photoAspectForVariant(variant), safeVariant(variant), suffix, promise)
+  }
+
+  @ReactMethod
+  fun createPhotoVariantWithAspect(sourcePath: String, suffix: String, aspectWidth: Double, aspectHeight: Double, promise: Promise) {
+    val width = aspectWidth.coerceAtLeast(1.0)
+    val height = aspectHeight.coerceAtLeast(1.0)
+    createPhotoVariantInternal(sourcePath, width / height, "wysiwyg", suffix, promise)
+  }
+
+  private fun createPhotoVariantInternal(sourcePath: String, targetAspect: Double, variantLabel: String, suffix: String, promise: Promise) {
     try {
       val source = File(sourcePath.removePrefix("file://"))
       if (!source.exists()) {
@@ -51,12 +62,11 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       }
 
       val upright = applyExifOrientation(decoded, source.absolutePath)
-      val targetAspect = photoAspectForVariant(variant)
       val cropped = centerCrop(upright, targetAspect)
 
       val target = File(
           reactContext.cacheDir,
-          "DualViewCamera_${safeSuffix(suffix)}_${safeVariant(variant)}_${System.currentTimeMillis()}.jpg"
+          "DualViewCamera_${safeSuffix(suffix)}_${variantLabel}_${System.currentTimeMillis()}.jpg"
       )
       FileOutputStream(target).use { output ->
         cropped.compress(Bitmap.CompressFormat.JPEG, 94, output)
