@@ -1,97 +1,161 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# DualViewCameraV1
 
-# Getting Started
+基于 React Native 0.85.1 和 `react-native-vision-camera@5.0.1` 实现的 Android 双画面相机应用。
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+当前优先支持 Android 真机 USB 调试和打包；iOS 暂不作为交付目标。
 
-## Step 1: Start Metro
+## 环境要求
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- Node.js: `>=22.11.0`
+- Android SDK: `D:\software\AndroidSDK`
+- 构建 Java: Android Studio JBR，路径 `D:\software\Android\jbr`
+- NDK: `30.0.14904198-beta1`，Gradle 中通过 `ndkVersion = "30.0.14904198"` 使用
+- Android Gradle 构建入口: `android\gradlew.bat`
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+首次拉取或依赖变更后安装依赖：
 
-```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
+```powershell
+npm install
 ```
 
-## Step 2: Build and run your app
+## 本地验证
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+从项目根目录执行：
 
-### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+```powershell
+$env:JAVA_HOME="D:\software\Android\jbr"
+$env:ANDROID_HOME="D:\software\AndroidSDK"
+$env:ANDROID_SDK_ROOT="D:\software\AndroidSDK"
+npx tsc --noEmit
 ```
 
-### iOS
+构建 Debug 包：
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+```powershell
+cd android
+.\gradlew.bat :app:assembleDebug
 ```
 
-Then, and every time you update your native dependencies, run:
+Debug APK 输出位置：
 
-```sh
-bundle exec pod install
+```text
+android\app\build\outputs\apk\debug\app-debug.apk
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+当前 Debug 变体会内置 JS bundle，Android Studio 直接 Run 不依赖 Metro。JS 修改后需要重新 Run 或重新构建 APK 才会进入安装包。
 
-```sh
-# Using npm
-npm run ios
+## 构建 Release 包
 
-# OR using Yarn
-yarn ios
+从项目根目录执行：
+
+```powershell
+$env:JAVA_HOME="D:\software\Android\jbr"
+$env:ANDROID_HOME="D:\software\AndroidSDK"
+$env:ANDROID_SDK_ROOT="D:\software\AndroidSDK"
+cd android
+.\gradlew.bat clean
+.\gradlew.bat :app:assembleRelease
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+Release APK 输出位置：
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+```text
+android\app\build\outputs\apk\release\app-release.apk
+```
 
-## Step 3: Modify your app
+如果需要给应用市场使用，优先构建 AAB：
 
-Now that you have successfully run the app, let's make changes!
+```powershell
+cd android
+.\gradlew.bat :app:bundleRelease
+```
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+AAB 输出位置：
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+```text
+android\app\build\outputs\bundle\release\app-release.aab
+```
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+## 正式签名配置
 
-## Congratulations! :tada:
+没有配置正式签名时，`assembleRelease` 会沿用 `debug.keystore` 生成可安装的内测 release APK。这个包不适合作为生产分发或应用市场上架包。
 
-You've successfully run and modified your React Native App. :partying_face:
+生成正式 keystore 示例：
 
-### Now what?
+```powershell
+keytool -genkeypair `
+  -v `
+  -storetype PKCS12 `
+  -keystore android\app\dualviewcamera-release.jks `
+  -alias dualviewcamera `
+  -keyalg RSA `
+  -keysize 2048 `
+  -validity 10000
+```
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+创建 `android\signing.properties`，填写你的真实密码和别名：
 
-# Troubleshooting
+```properties
+DUALVIEW_RELEASE_STORE_FILE=dualviewcamera-release.jks
+DUALVIEW_RELEASE_STORE_PASSWORD=your-store-password
+DUALVIEW_RELEASE_KEY_ALIAS=dualviewcamera
+DUALVIEW_RELEASE_KEY_PASSWORD=your-key-password
+```
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+说明：
 
-# Learn More
+- `DUALVIEW_RELEASE_STORE_FILE` 相对路径以 `android\app` 为基准；也可以填写绝对路径。
+- `android\signing.properties`、`*.keystore`、`*.jks` 已加入 `.gitignore`，不要提交签名文件和密码。
+- 配置完成后重新执行 `.\gradlew.bat :app:assembleRelease` 或 `.\gradlew.bat :app:bundleRelease`，产物会使用正式 keystore 签名。
 
-To learn more about React Native, take a look at the following resources:
+也可以不用 `android\signing.properties`，改用环境变量：
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+```powershell
+$env:DUALVIEW_RELEASE_STORE_FILE="D:\secure\dualviewcamera-release.jks"
+$env:DUALVIEW_RELEASE_STORE_PASSWORD="your-store-password"
+$env:DUALVIEW_RELEASE_KEY_ALIAS="dualviewcamera"
+$env:DUALVIEW_RELEASE_KEY_PASSWORD="your-key-password"
+```
+
+## 安装到 USB 真机
+
+构建后安装 APK：
+
+```powershell
+adb devices
+adb install -r android\app\build\outputs\apk\release\app-release.apk
+```
+
+启动应用：
+
+```powershell
+adb shell monkey -p com.dualviewcamerav1init 1
+```
+
+## 生产包发布前检查
+
+发布前建议至少执行：
+
+```powershell
+npx tsc --noEmit
+cd android
+.\gradlew.bat :app:assembleRelease
+```
+
+真机回归重点：
+
+- 首次启动相机权限申请。
+- 单画面拍照和录像。
+- 双画面主副预览、点击 PiP 主副切换。
+- 双画面拍照生成主图和副图。
+- 双画面录像生成主视频和副视频。
+- 后台切回前台预览不冻结。
+- 生成文件可在系统相册 `DCIM/DualViewCamera` 检索。
+
+## 关键实现约束
+
+- 双画面是同一摄像头同源预览的多视图裁剪，不是双摄并发。
+- 单画面模式只展示一个实时取景画面。
+- 双画面预览态展示主画面和 PiP 副画面；拍照或录像时会临时切换 CameraX 输出组合，避免 surface combination 错误。
+- 主画面照片输出 3:4，横向副画面从同源 4:3 输出中裁切为 16:9。
+- 双画面录像通过原生 Media3 Transformer 生成主/副构图视频；转码失败时回退保存原始文件，避免崩溃。

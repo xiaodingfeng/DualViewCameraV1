@@ -74,6 +74,18 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def signingProperties = new Properties()
+def signingPropertiesFile = rootProject.file("signing.properties")
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+
+def releaseStoreFile = signingProperties.getProperty("DUALVIEW_RELEASE_STORE_FILE") ?: System.getenv("DUALVIEW_RELEASE_STORE_FILE")
+def releaseStorePassword = signingProperties.getProperty("DUALVIEW_RELEASE_STORE_PASSWORD") ?: System.getenv("DUALVIEW_RELEASE_STORE_PASSWORD")
+def releaseKeyAlias = signingProperties.getProperty("DUALVIEW_RELEASE_KEY_ALIAS") ?: System.getenv("DUALVIEW_RELEASE_KEY_ALIAS")
+def releaseKeyPassword = signingProperties.getProperty("DUALVIEW_RELEASE_KEY_PASSWORD") ?: System.getenv("DUALVIEW_RELEASE_KEY_PASSWORD")
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -94,15 +106,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
