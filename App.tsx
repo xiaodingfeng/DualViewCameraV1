@@ -3,6 +3,7 @@ import {
   Alert,
   AppState,
   BackHandler,
+  FlatList,
   GestureResponderEvent,
   Image,
   Linking,
@@ -15,7 +16,6 @@ import {
   PermissionsAndroid,
   SafeAreaView,
   ScrollView,
-  Share,
   StatusBar,
   StyleSheet,
   Text,
@@ -56,6 +56,7 @@ type LastMedia = { uri: string; type: 'photo' | 'video'; label: string } | null;
 type GalleryMedia = {
   id: string;
   uri: string;
+  filepath: string | null;
   type: 'photo' | 'video';
   filename: string | null;
   fileSize: number | null;
@@ -136,6 +137,7 @@ const { DualViewMedia } = NativeModules as {
     createPhotoVariant(sourcePath: string, variant: PhotoVariant, suffix: string): Promise<string>;
     createPhotoVariantWithAspect?(sourcePath: string, suffix: string, aspectWidth: number, aspectHeight: number): Promise<string>;
     createPhotoVariantWithAspectAndFormat?(sourcePath: string, suffix: string, aspectWidth: number, aspectHeight: number, format: PhotoFormat): Promise<string>;
+    getMediaStoragePath?(uri: string): Promise<string>;
     createDualPhotoVariantsWithAspects?(
       sourcePath: string,
       mainSuffix: string,
@@ -156,6 +158,7 @@ const { DualViewMedia } = NativeModules as {
       format: PhotoFormat,
     ): Promise<{ mainPath: string; subPath: string }>;
     createVideoVariant?(sourcePath: string, variant: PhotoVariant, suffix: string, width: number, height: number, codec: VideoCodecFormat): Promise<string>;
+    shareMedia?(uri: string, mimeType: string, title: string): Promise<boolean>;
   };
 };
 
@@ -1103,27 +1106,36 @@ function GalleryModal({
   onIndexChange: (index: number) => void;
   open: boolean;
 }) {
-  const scrollerRef = useRef<ScrollView | null>(null);
+  const listRef = useRef<FlatList<GalleryMedia> | null>(null);
   const [viewerWidth, setViewerWidth] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(() => new Set());
   const current = items[index] ?? null;
 
   useEffect(() => {
     if (!open || viewerWidth <= 0) return;
     requestAnimationFrame(() => {
-      scrollerRef.current?.scrollTo({ x: index * viewerWidth, animated: false });
+      listRef.current?.scrollToIndex({ index, animated: false });
     });
   }, [index, open, viewerWidth]);
 
   useEffect(() => {
     if (!open) {
       setDetailsOpen(false);
+      setFailedPreviewIds(new Set());
     }
   }, [open]);
 
-  const shareCurrent = useCallback(() => {
+  const shareCurrent = useCallback(async () => {
     if (current == null) return;
-    Share.share({ title: current.filename ?? 'DualViewCamera', url: current.uri, message: current.uri }).catch(() => {});
+    try {
+      if (DualViewMedia?.shareMedia) {
+        await DualViewMedia.shareMedia(current.uri, mimeTypeForMedia(current), current.filename ?? 'DualViewCamera');
+        return;
+      }
+      await Linking.openURL(current.uri);
+    } catch {
+    }
   }, [current]);
 
   const openCurrent = useCallback(() => {
@@ -1150,31 +1162,48 @@ function GalleryModal({
           <Text style={styles.galleryCount}>{items.length > 0 ? `${index + 1}/${items.length}` : '0/0'}</Text>
         </View>
         {viewerWidth > 0 && items.length > 0 ? (
-          <ScrollView
-            ref={scrollerRef}
+          <FlatList
+            ref={listRef}
+            data={items}
             horizontal
+            initialNumToRender={3}
+            keyExtractor={item => item.id}
+            maxToRenderPerBatch={3}
             pagingEnabled
+            removeClippedSubviews
+            renderItem={({ item, index: itemIndex }) => (
+              <Pressable style={[styles.galleryPage, { width: viewerWidth }]} onPress={() => setDetailsOpen(value => !value)}>
+                {Math.abs(itemIndex - index) > 2 ? (
+                  <View style={styles.galleryLazyPage} />
+                ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
+                  <Image
+                    source={{ uri: item.uri }}
+                    style={styles.galleryImage}
+                    resizeMode="contain"
+                    onError={() => setFailedPreviewIds(previous => {
+                      const next = new Set(previous);
+                      next.add(item.id);
+                      return next;
+                    })}
+                  />
+                ) : (
+                  <MediaPreviewFallback item={item} />
+                )}
+              </Pressable>
+            )}
             showsHorizontalScrollIndicator={false}
+            windowSize={5}
+            getItemLayout={(_, itemIndex) => ({ length: viewerWidth, offset: viewerWidth * itemIndex, index: itemIndex })}
             onMomentumScrollEnd={event => {
               const nextIndex = Math.round(event.nativeEvent.contentOffset.x / viewerWidth);
               onIndexChange(clamp(nextIndex, 0, items.length - 1));
             }}
-          >
-            {items.map(item => (
-              <Pressable key={item.id} style={[styles.galleryPage, { width: viewerWidth }]} onPress={() => setDetailsOpen(value => !value)}>
-                {item.type === 'photo' ? (
-                  <Image source={{ uri: item.uri }} style={styles.galleryImage} resizeMode="contain" />
-                ) : (
-                  <View style={styles.videoPreview}>
-                    <Text style={styles.videoPreviewIcon}>▶</Text>
-                    <Text style={styles.videoPreviewTitle}>视频</Text>
-                    <Text style={styles.videoPreviewText}>{formatDuration(Math.floor(item.duration || 0))}</Text>
-                    <Text style={styles.videoPreviewHint}>点“操作”可用系统查看或分享</Text>
-                  </View>
-                )}
-              </Pressable>
-            ))}
-          </ScrollView>
+            onScrollToIndexFailed={info => {
+              setTimeout(() => {
+                listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+              }, 50);
+            }}
+          />
         ) : (
           <View style={styles.galleryEmpty}><Text style={styles.galleryEmptyText}>还没有拍摄内容</Text></View>
         )}
@@ -1200,6 +1229,18 @@ function GalleryModal({
   );
 }
 
+function MediaPreviewFallback({ item }: { item: GalleryMedia }) {
+  const isVideo = item.type === 'video';
+  return (
+    <View style={styles.mediaPreviewFallback}>
+      <Text style={styles.videoPreviewIcon}>{isVideo ? '▶' : '!'}</Text>
+      <Text style={styles.videoPreviewTitle}>{isVideo ? '视频' : '无法预览'}</Text>
+      {isVideo ? <Text style={styles.videoPreviewText}>{formatDuration(Math.floor(item.duration || 0))}</Text> : null}
+      <Text style={styles.videoPreviewHint}>{isVideo ? '可查看或分享原视频' : '可用系统查看或分享原文件'}</Text>
+    </View>
+  );
+}
+
 function MediaDetails({ item }: { item: GalleryMedia }) {
   return (
     <View style={styles.mediaDetails}>
@@ -1209,7 +1250,7 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
       <Text style={styles.mediaDetailsText}>尺寸：{item.width || '-'} × {item.height || '-'}</Text>
       {item.type === 'video' ? <Text style={styles.mediaDetailsText}>时长：{formatDuration(Math.floor(item.duration || 0))}</Text> : null}
       <Text style={styles.mediaDetailsText}>大小：{formatBytes(item.fileSize)}</Text>
-      <Text style={styles.mediaDetailsPath} numberOfLines={2}>{item.uri}</Text>
+      <Text style={styles.mediaDetailsPath} numberOfLines={3}>{item.filepath ?? item.uri}</Text>
     </View>
   );
 }
@@ -1509,7 +1550,16 @@ async function loadDualViewGallery(): Promise<GalleryMedia[]> {
       groupName: 'DualViewCamera',
       include: ['filename', 'fileSize', 'imageSize', 'playableDuration'],
     });
-    return result.edges.map(cameraRollNodeToGalleryMedia).filter(Boolean) as GalleryMedia[];
+    const items = result.edges.map(cameraRollNodeToGalleryMedia).filter(Boolean) as GalleryMedia[];
+    if (!DualViewMedia?.getMediaStoragePath) return items;
+    return Promise.all(items.map(async item => {
+      try {
+        const filepath = await DualViewMedia.getMediaStoragePath?.(item.uri);
+        return filepath ? { ...item, filepath } : item;
+      } catch {
+        return item;
+      }
+    }));
   } catch {
     return [];
   }
@@ -1524,6 +1574,7 @@ function cameraRollNodeToGalleryMedia(asset: any): GalleryMedia | null {
   return {
     id: String(node.id ?? image.uri),
     uri: image.uri,
+    filepath: image.filepath ?? null,
     type,
     filename: image.filename ?? null,
     fileSize: typeof image.fileSize === 'number' ? image.fileSize : null,
@@ -1541,6 +1592,13 @@ function mediaToLastMedia(item: GalleryMedia | null): LastMedia {
     type: item.type,
     label: item.filename ?? (item.type === 'photo' ? '照片' : '视频'),
   };
+}
+function mimeTypeForMedia(item: GalleryMedia): string {
+  const filename = item.filename?.toLowerCase() ?? item.uri.toLowerCase();
+  if (item.type === 'video') return 'video/mp4';
+  if (filename.endsWith('.heic') || filename.endsWith('.heif')) return 'image/heif';
+  if (filename.endsWith('.png')) return 'image/png';
+  return 'image/jpeg';
 }
 
 function toFileUri(path: string): string { return path.startsWith('file://') ? path : `file://${path}`; }
@@ -1842,9 +1900,11 @@ const styles = StyleSheet.create({
   galleryTopText: { color: COLORS.text, fontSize: 14, fontWeight: '800' },
   galleryCount: { color: COLORS.text, fontSize: 14, fontWeight: '900' },
   galleryPage: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
+  galleryLazyPage: { flex: 1, backgroundColor: '#000' },
   galleryImage: { width: '100%', height: '100%' },
   galleryEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   galleryEmptyText: { color: COLORS.muted, fontSize: 14, fontWeight: '700' },
+  mediaPreviewFallback: { minWidth: 210, minHeight: 180, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, backgroundColor: 'rgba(255,255,255,0.08)' },
   videoPreview: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
   videoPreviewIcon: { color: COLORS.text, fontSize: 54, fontWeight: '900', marginBottom: 12 },
   videoPreviewTitle: { color: COLORS.text, fontSize: 22, fontWeight: '900', marginBottom: 8 },

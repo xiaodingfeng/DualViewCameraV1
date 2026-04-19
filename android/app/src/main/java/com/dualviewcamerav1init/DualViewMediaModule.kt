@@ -1,11 +1,14 @@
 package com.dualviewcamerav1init
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
 import androidx.heifwriter.HeifWriter
 import androidx.media3.common.Effect
@@ -37,6 +40,74 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   private val activeTransformers = ConcurrentHashMap<String, Transformer>()
 
   override fun getName(): String = "DualViewMedia"
+
+  @ReactMethod
+  fun shareMedia(uriString: String, mimeType: String, title: String, promise: Promise) {
+    try {
+      val uri = Uri.parse(uriString)
+      val shareIntent = Intent(Intent.ACTION_SEND).apply {
+        type = mimeType.ifBlank { "*/*" }
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      val chooser = Intent.createChooser(shareIntent, title.ifBlank { "分享" }).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      reactContext.startActivity(chooser)
+      promise.resolve(true)
+    } catch (error: Throwable) {
+      promise.reject("ESHARE", error.message, error)
+    }
+  }
+
+  @ReactMethod
+  fun getMediaStoragePath(uriString: String, promise: Promise) {
+    try {
+      val uri = Uri.parse(uriString)
+      if (uri.scheme == "file") {
+        promise.resolve(uri.path ?: uriString.removePrefix("file://"))
+        return
+      }
+      val columns = mutableListOf(
+          MediaStore.MediaColumns.DATA,
+          MediaStore.MediaColumns.DISPLAY_NAME
+      )
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        columns.add(MediaStore.MediaColumns.RELATIVE_PATH)
+      }
+      reactContext.contentResolver.query(uri, columns.toTypedArray(), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+          val dataIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+          if (dataIndex >= 0) {
+            val data = cursor.getString(dataIndex)
+            if (!data.isNullOrBlank()) {
+              promise.resolve(data)
+              return
+            }
+          }
+          val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+          val filename = if (nameIndex >= 0) cursor.getString(nameIndex) else null
+          if (!filename.isNullOrBlank() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val relativeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+            val relativePath = if (relativeIndex >= 0) cursor.getString(relativeIndex) else null
+            if (!relativePath.isNullOrBlank()) {
+              val root = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+              promise.resolve("$root/${relativePath.trimStart('/')}$filename")
+              return
+            }
+          }
+          if (!filename.isNullOrBlank()) {
+            val root = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+            promise.resolve("$root/DCIM/DualViewCamera/$filename")
+            return
+          }
+        }
+      }
+      promise.resolve(uriString)
+    } catch (error: Throwable) {
+      promise.reject("EPATH", error.message, error)
+    }
+  }
 
   @ReactMethod
   fun createPhotoVariant(sourcePath: String, variant: String, suffix: String, promise: Promise) {
