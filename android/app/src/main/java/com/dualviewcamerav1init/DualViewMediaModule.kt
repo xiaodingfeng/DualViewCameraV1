@@ -5,7 +5,9 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import androidx.exifinterface.media.ExifInterface
+import androidx.heifwriter.HeifWriter
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -21,6 +23,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.WritableNativeMap
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -37,17 +40,57 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun createPhotoVariant(sourcePath: String, variant: String, suffix: String, promise: Promise) {
-    createPhotoVariantInternal(sourcePath, photoAspectForVariant(variant), safeVariant(variant), suffix, promise)
+    createPhotoVariantInternal(sourcePath, photoAspectForVariant(variant), safeVariant(variant), suffix, "jpeg", promise)
   }
 
   @ReactMethod
   fun createPhotoVariantWithAspect(sourcePath: String, suffix: String, aspectWidth: Double, aspectHeight: Double, promise: Promise) {
-    val width = aspectWidth.coerceAtLeast(1.0)
-    val height = aspectHeight.coerceAtLeast(1.0)
-    createPhotoVariantInternal(sourcePath, width / height, "wysiwyg", suffix, promise)
+    createPhotoVariantWithAspectAndFormat(sourcePath, suffix, aspectWidth, aspectHeight, "jpeg", promise)
   }
 
-  private fun createPhotoVariantInternal(sourcePath: String, targetAspect: Double, variantLabel: String, suffix: String, promise: Promise) {
+  @ReactMethod
+  fun createPhotoVariantWithAspectAndFormat(sourcePath: String, suffix: String, aspectWidth: Double, aspectHeight: Double, format: String, promise: Promise) {
+    val width = aspectWidth.coerceAtLeast(1.0)
+    val height = aspectHeight.coerceAtLeast(1.0)
+    createPhotoVariantInternal(sourcePath, width / height, "wysiwyg", suffix, format, promise)
+  }
+
+  @ReactMethod
+  fun createDualPhotoVariantsWithAspects(
+      sourcePath: String,
+      mainSuffix: String,
+      mainAspectWidth: Double,
+      mainAspectHeight: Double,
+      subSuffix: String,
+      subAspectWidth: Double,
+      subAspectHeight: Double,
+      promise: Promise
+  ) {
+    createDualPhotoVariantsWithAspectsAndFormat(
+        sourcePath,
+        mainSuffix,
+        mainAspectWidth,
+        mainAspectHeight,
+        subSuffix,
+        subAspectWidth,
+        subAspectHeight,
+        "jpeg",
+        promise
+    )
+  }
+
+  @ReactMethod
+  fun createDualPhotoVariantsWithAspectsAndFormat(
+      sourcePath: String,
+      mainSuffix: String,
+      mainAspectWidth: Double,
+      mainAspectHeight: Double,
+      subSuffix: String,
+      subAspectWidth: Double,
+      subAspectHeight: Double,
+      format: String,
+      promise: Promise
+  ) {
     try {
       val source = File(sourcePath.removePrefix("file://"))
       if (!source.exists()) {
@@ -62,19 +105,52 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       }
 
       val upright = applyExifOrientation(decoded, source.absolutePath)
-      val cropped = centerCrop(upright, targetAspect)
-
-      val target = File(
-          reactContext.cacheDir,
-          "DualViewCamera_${safeSuffix(suffix)}_${variantLabel}_${System.currentTimeMillis()}.jpg"
+      val mainTarget = writePhotoVariant(
+          upright,
+          mainAspectWidth.coerceAtLeast(1.0) / mainAspectHeight.coerceAtLeast(1.0),
+          "main",
+          mainSuffix,
+          format
       )
-      FileOutputStream(target).use { output ->
-        cropped.compress(Bitmap.CompressFormat.JPEG, 94, output)
-      }
+      val subTarget = writePhotoVariant(
+          upright,
+          subAspectWidth.coerceAtLeast(1.0) / subAspectHeight.coerceAtLeast(1.0),
+          "sub",
+          subSuffix,
+          format
+      )
 
       if (decoded !== upright) decoded.recycle()
-      if (upright !== cropped) upright.recycle()
-      cropped.recycle()
+      upright.recycle()
+
+      val result = WritableNativeMap()
+      result.putString("mainPath", mainTarget.absolutePath)
+      result.putString("subPath", subTarget.absolutePath)
+      promise.resolve(result)
+    } catch (error: Throwable) {
+      promise.reject("ECROP", error.message, error)
+    }
+  }
+
+  private fun createPhotoVariantInternal(sourcePath: String, targetAspect: Double, variantLabel: String, suffix: String, format: String, promise: Promise) {
+    try {
+      val source = File(sourcePath.removePrefix("file://"))
+      if (!source.exists()) {
+        promise.reject("ENOENT", "Source photo does not exist: ${source.absolutePath}")
+        return
+      }
+
+      val decoded = BitmapFactory.decodeFile(source.absolutePath)
+      if (decoded == null) {
+        promise.reject("EDECODE", "Unable to decode source photo: ${source.absolutePath}")
+        return
+      }
+
+      val upright = applyExifOrientation(decoded, source.absolutePath)
+      val target = writePhotoVariant(upright, targetAspect, variantLabel, suffix, format)
+
+      if (decoded !== upright) decoded.recycle()
+      upright.recycle()
 
       promise.resolve(target.absolutePath)
     } catch (error: Throwable) {
@@ -82,8 +158,26 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun writePhotoVariant(source: Bitmap, targetAspect: Double, variantLabel: String, suffix: String, format: String): File {
+    val cropped = centerCrop(source, targetAspect)
+    val useHeif = shouldWriteHeif(format)
+    val target = File(
+        reactContext.cacheDir,
+        "DualViewCamera_${safeSuffix(suffix)}_${variantLabel}_${System.currentTimeMillis()}.${if (useHeif) "heic" else "jpg"}"
+    )
+    if (useHeif) {
+      writeHeif(cropped, target)
+    } else {
+      FileOutputStream(target).use { output ->
+        cropped.compress(Bitmap.CompressFormat.JPEG, 94, output)
+      }
+    }
+    if (source !== cropped) cropped.recycle()
+    return target
+  }
+
   @ReactMethod
-  fun createVideoVariant(sourcePath: String, variant: String, suffix: String, targetWidth: Double, targetHeight: Double, promise: Promise) {
+  fun createVideoVariant(sourcePath: String, variant: String, suffix: String, targetWidth: Double, targetHeight: Double, codec: String, promise: Promise) {
     try {
       val source = File(sourcePath.removePrefix("file://"))
       if (!source.exists()) {
@@ -97,7 +191,8 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       )
       
       val targetSpec = videoTargetSpec(variant, targetWidth, targetHeight)
-      if (isSourceAspectCloseToTarget(source, targetSpec)) {
+      val targetCodec = videoCodecMimeType(codec)
+      if (isSourceCompatibleWithTarget(source, targetSpec, targetCodec)) {
         promise.resolve(source.absolutePath)
         return
       }
@@ -137,7 +232,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
         }
       }
       val transformer = Transformer.Builder(reactContext)
-          .setVideoMimeType(MimeTypes.VIDEO_H264)
+          .setVideoMimeType(targetCodec)
           .setAudioMimeType(MimeTypes.AUDIO_AAC)
           .addListener(listener)
           .build()
@@ -176,7 +271,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
-  private fun isSourceAspectCloseToTarget(source: File, targetSpec: VideoTargetSpec): Boolean {
+  private fun isSourceCompatibleWithTarget(source: File, targetSpec: VideoTargetSpec, targetMimeType: String): Boolean {
     val retriever = MediaMetadataRetriever()
     return try {
       retriever.setDataSource(source.absolutePath)
@@ -189,7 +284,8 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       val displayHeight = if (rotation == 90 || rotation == 270) width else height
       val sourceAspect = displayWidth / displayHeight
       val targetAspect = targetSpec.width.toDouble() / targetSpec.height.toDouble()
-      kotlin.math.abs(sourceAspect - targetAspect) < 0.015
+      val sourceMimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+      kotlin.math.abs(sourceAspect - targetAspect) < 0.015 && sourceMimeType == targetMimeType
     } catch (_: Throwable) {
       false
     } finally {
@@ -260,5 +356,34 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       "portrait", "landscape", "full", "square", "photo4x3", "video16x9" -> value
       else -> "media"
     }
+  }
+
+  private fun shouldWriteHeif(format: String): Boolean {
+    return format == "heic" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+  }
+
+  private fun writeHeif(bitmap: Bitmap, target: File) {
+    val writer = HeifWriter.Builder(
+        target.absolutePath,
+        bitmap.width,
+        bitmap.height,
+        HeifWriter.INPUT_MODE_BITMAP
+    )
+        .setQuality(94)
+        .build()
+    try {
+      writer.start()
+      writer.addBitmap(bitmap)
+      writer.stop(0)
+    } finally {
+      try {
+        writer.close()
+      } catch (_: Throwable) {
+      }
+    }
+  }
+
+  private fun videoCodecMimeType(codec: String): String {
+    return if (codec == "h264") MimeTypes.VIDEO_H264 else MimeTypes.VIDEO_H265
   }
 }

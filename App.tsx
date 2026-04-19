@@ -52,16 +52,20 @@ type FlashMode = 'off' | 'on' | 'auto';
 type LastMedia = { uri: string; type: 'photo' | 'video'; label: string } | null;
 type AspectRatioId = 'full' | '1:1' | '4:3' | '16:9';
 type PhotoQuality = 'high' | 'standard' | 'low';
+type PhotoFormat = 'jpeg' | 'heic';
 type VideoQuality = '720' | '1080' | '4K' | '8K';
 type VideoFps = 30 | 60;
+type VideoCodecFormat = 'h265' | 'h264';
 type SettingsTab = 'photo' | 'video';
 type PhotoVariant = 'full' | 'portrait' | 'landscape' | 'square' | 'photo4x3' | 'video16x9';
 type VisibleFrameSpec = { aspect: number; variant: PhotoVariant };
 type PersistedSettings = Partial<{
   selectedAspectId: AspectRatioId;
   photoQuality: PhotoQuality;
+  photoFormat: PhotoFormat;
   videoFps: VideoFps;
   videoQuality: VideoQuality;
+  videoCodec: VideoCodecFormat;
   viewMode: ViewMode;
   saveDualOutputs: boolean;
 }>;
@@ -96,6 +100,11 @@ const PHOTO_QUALITY_CONFIG: Record<PhotoQuality, { label: string; quality: numbe
   low: { label: '低', quality: 0.72, priority: 'speed' },
 };
 
+const PHOTO_FORMAT_CONFIG: Record<PhotoFormat, { label: string }> = {
+  jpeg: { label: 'JPG' },
+  heic: { label: 'HEIF' },
+};
+
 const VIDEO_QUALITY_CONFIG: Record<VideoQuality, { label: string; resolution: { width: number; height: number }; landscape: { width: number; height: number }; portrait: { width: number; height: number } }> = {
   '720': { label: '720', resolution: CommonResolutions.HD_16_9, landscape: { width: 1280, height: 720 }, portrait: { width: 720, height: 1280 } },
   '1080': { label: '1080', resolution: CommonResolutions.FHD_16_9, landscape: { width: 1920, height: 1080 }, portrait: { width: 1080, height: 1920 } },
@@ -103,11 +112,36 @@ const VIDEO_QUALITY_CONFIG: Record<VideoQuality, { label: string; resolution: { 
   '8K': { label: '8K', resolution: CommonResolutions['8k_16_9'], landscape: { width: 8064, height: 4536 }, portrait: { width: 4536, height: 8064 } },
 };
 
+const VIDEO_CODEC_CONFIG: Record<VideoCodecFormat, { label: string }> = {
+  h265: { label: 'HEVC' },
+  h264: { label: 'H.264' },
+};
+
 const { DualViewMedia } = NativeModules as {
   DualViewMedia?: {
     createPhotoVariant(sourcePath: string, variant: PhotoVariant, suffix: string): Promise<string>;
     createPhotoVariantWithAspect?(sourcePath: string, suffix: string, aspectWidth: number, aspectHeight: number): Promise<string>;
-    createVideoVariant?(sourcePath: string, variant: PhotoVariant, suffix: string, width: number, height: number): Promise<string>;
+    createPhotoVariantWithAspectAndFormat?(sourcePath: string, suffix: string, aspectWidth: number, aspectHeight: number, format: PhotoFormat): Promise<string>;
+    createDualPhotoVariantsWithAspects?(
+      sourcePath: string,
+      mainSuffix: string,
+      mainAspectWidth: number,
+      mainAspectHeight: number,
+      subSuffix: string,
+      subAspectWidth: number,
+      subAspectHeight: number,
+    ): Promise<{ mainPath: string; subPath: string }>;
+    createDualPhotoVariantsWithAspectsAndFormat?(
+      sourcePath: string,
+      mainSuffix: string,
+      mainAspectWidth: number,
+      mainAspectHeight: number,
+      subSuffix: string,
+      subAspectWidth: number,
+      subAspectHeight: number,
+      format: PhotoFormat,
+    ): Promise<{ mainPath: string; subPath: string }>;
+    createVideoVariant?(sourcePath: string, variant: PhotoVariant, suffix: string, width: number, height: number, codec: VideoCodecFormat): Promise<string>;
   };
 };
 
@@ -195,8 +229,10 @@ function CameraShell({
   const physicalOrientation = useOrientation('device');
   const [selectedAspectId, setSelectedAspectId] = useState<AspectRatioId>('16:9');
   const [photoQuality, setPhotoQuality] = useState<PhotoQuality>('high');
+  const [photoFormat, setPhotoFormat] = useState<PhotoFormat>('jpeg');
   const [videoFps, setVideoFps] = useState<VideoFps>(30);
   const [videoQuality, setVideoQuality] = useState<VideoQuality>('4K');
+  const [videoCodec, setVideoCodec] = useState<VideoCodecFormat>('h265');
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -211,6 +247,7 @@ function CameraShell({
   const pipPreviewOutput = usePreviewOutput();
   const photoOutput = usePhotoOutput({
     targetResolution: CommonResolutions.UHD_4_3,
+    containerFormat: photoFormat,
     quality: photoQualityConfig.quality,
     qualityPrioritization: photoQualityConfig.priority === 'speed' && !device.supportsSpeedQualityPrioritization
       ? 'balanced'
@@ -260,8 +297,10 @@ function CameraShell({
         if (cancelled) return;
         if (isAspectRatioId(settings.selectedAspectId)) setSelectedAspectId(settings.selectedAspectId);
         if (isPhotoQuality(settings.photoQuality)) setPhotoQuality(settings.photoQuality);
+        if (isPhotoFormat(settings.photoFormat)) setPhotoFormat(settings.photoFormat);
         if (isVideoFps(settings.videoFps)) setVideoFps(settings.videoFps);
         if (isVideoQuality(settings.videoQuality)) setVideoQuality(settings.videoQuality);
+        if (isVideoCodecFormat(settings.videoCodec)) setVideoCodec(settings.videoCodec);
         if (isViewMode(settings.viewMode)) setViewMode(settings.viewMode);
         if (typeof settings.saveDualOutputs === 'boolean') setSaveDualOutputs(settings.saveDualOutputs);
       })
@@ -278,12 +317,14 @@ function CameraShell({
     savePersistedSettings({
       selectedAspectId,
       photoQuality,
+      photoFormat,
       videoFps,
       videoQuality,
+      videoCodec,
       viewMode,
       saveDualOutputs,
     }).catch(() => {});
-  }, [photoQuality, saveDualOutputs, selectedAspectId, settingsLoaded, videoFps, videoQuality, viewMode]);
+  }, [photoFormat, photoQuality, saveDualOutputs, selectedAspectId, settingsLoaded, videoCodec, videoFps, videoQuality, viewMode]);
 
   const isDeviceLandscape = physicalOrientation?.startsWith('landscape') ?? false;
   const defaultSubOrientation: FrameOrientation = isDeviceLandscape ? 'portrait' : 'landscape';
@@ -533,6 +574,25 @@ function CameraShell({
     return uri;
   }, []);
 
+  const saveCapturedPhotoInBackground = useCallback((filePath: string, options: { mainSpec: VisibleFrameSpec; subSpec: VisibleFrameSpec; dual: boolean; format: PhotoFormat }) => {
+    void (async () => {
+      try {
+        if (options.dual) {
+          const { mainPath, subPath } = await createDualPhotoVariantsForAspects(filePath, options.mainSpec, options.subSpec, options.format);
+          await Promise.all([
+            saveToGallery(mainPath, 'photo', '主画面'),
+            saveToGallery(subPath, 'photo', '副画面'),
+          ]);
+        } else {
+          const mainPath = await createPhotoVariantForAspect(filePath, options.mainSpec, 'main', options.format);
+          await saveToGallery(mainPath, 'photo', '主画面');
+        }
+      } catch (error) {
+        setToast(cameraErrorMessage(error, '照片保存失败'));
+      }
+    })();
+  }, [saveToGallery]);
+
   const prepareFlashForPhoto = useCallback(async () => {
     if (flashMode !== 'on' || cameraController == null || !device?.hasTorch) return false;
     try {
@@ -560,19 +620,12 @@ function CameraShell({
          flashMode: device?.hasFlash ? flashMode : 'off',
          enableShutterSound: true,
       }, {});
-      if (viewMode === 'dual' && saveDualOutputs) {
-        const [mainPath, subPath] = await Promise.all([
-          createPhotoVariantForAspect(file.filePath, mainFrameSpec, 'main'),
-          createPhotoVariantForAspect(file.filePath, subFrameSpec, 'sub'),
-        ]);
-        await Promise.all([
-          saveToGallery(mainPath, 'photo', '主画面'),
-          saveToGallery(subPath, 'photo', '副画面'),
-        ]);
-      } else {
-        const mainPath = await createPhotoVariantForAspect(file.filePath, mainFrameSpec, 'main');
-        await saveToGallery(mainPath, 'photo', '主画面');
-      }
+      saveCapturedPhotoInBackground(file.filePath, {
+        mainSpec: mainFrameSpec,
+        subSpec: subFrameSpec,
+        dual: viewMode === 'dual' && saveDualOutputs,
+        format: photoFormat,
+      });
     } catch (error) {
       setToast(cameraErrorMessage(error, '拍照失败'));
     } finally {
@@ -580,7 +633,7 @@ function CameraShell({
       setIsBusy(false);
       setPendingPhotoCapture(false);
     }
-  }, [captureMode, cleanupFlashAfterPhoto, device?.hasFlash, flashMode, isBusy, mainFrameSpec, pendingPhotoCapture, photoOutput, prepareFlashForPhoto, saveDualOutputs, saveToGallery, subFrameSpec, viewMode]);
+  }, [captureMode, cleanupFlashAfterPhoto, device?.hasFlash, flashMode, isBusy, mainFrameSpec, pendingPhotoCapture, photoFormat, photoOutput, prepareFlashForPhoto, saveCapturedPhotoInBackground, saveDualOutputs, subFrameSpec, viewMode]);
 
   useEffect(() => {
     if (!pendingPhotoCapture) return;
@@ -593,17 +646,17 @@ function CameraShell({
   const finishRecording = useCallback(async (filePath: string) => {
     try {
       const mainVariant = mainFrameSpec.variant;
-      const mainPath = await createVideoVariant(filePath, mainVariant, 'main', videoFrameSize(mainFrameSpec));
+      const mainPath = await createVideoVariant(filePath, mainVariant, 'main', videoFrameSize(mainFrameSpec), videoCodec);
       await saveToGallery(mainPath, 'video', '主画面');
       if (viewMode === 'dual' && saveDualOutputs) {
         const subVariant = subFrameSpec.variant;
-        const subPath = await createVideoVariant(filePath, subVariant, 'sub', videoFrameSize(subFrameSpec));
+        const subPath = await createVideoVariant(filePath, subVariant, 'sub', videoFrameSize(subFrameSpec), videoCodec);
         await saveToGallery(subPath, 'video', '副画面');
       }
     } catch (error) {
       setToast('录像保存失败');
     }
-  }, [mainFrameSpec, saveDualOutputs, saveToGallery, subFrameSpec, videoFrameSize, viewMode]);
+  }, [mainFrameSpec, saveDualOutputs, saveToGallery, subFrameSpec, videoCodec, videoFrameSize, viewMode]);
 
   const toggleRecording = useCallback(async () => {
     if (isBusy || captureMode !== 'video') return;
@@ -805,6 +858,8 @@ function CameraShell({
         onClose={() => setSettingsOpen(false)}
         onFlashModeChange={setFlashMode}
         open={settingsOpen}
+        photoFormat={photoFormat}
+        onPhotoFormatChange={setPhotoFormat}
         photoQuality={photoQuality}
         onPhotoQualityChange={setPhotoQuality}
         saveDualOutputs={saveDualOutputs}
@@ -812,6 +867,8 @@ function CameraShell({
         videoFps={videoFps}
         videoFpsOptions={videoFpsOptions}
         onVideoFpsChange={setVideoFps}
+        videoCodec={videoCodec}
+        onVideoCodecChange={setVideoCodec}
         videoQuality={videoQuality}
         onVideoQualityChange={setVideoQuality}
         viewMode={viewMode}
@@ -1099,6 +1156,8 @@ function SettingsModal({
   onClose,
   onFlashModeChange,
   open,
+  photoFormat,
+  onPhotoFormatChange,
   photoQuality,
   onPhotoQualityChange,
   saveDualOutputs,
@@ -1106,6 +1165,8 @@ function SettingsModal({
   videoFps,
   videoFpsOptions,
   onVideoFpsChange,
+  videoCodec,
+  onVideoCodecChange,
   videoQuality,
   onVideoQualityChange,
   viewMode,
@@ -1116,6 +1177,8 @@ function SettingsModal({
   onClose: () => void;
   onFlashModeChange: (mode: FlashMode) => void;
   open: boolean;
+  photoFormat: PhotoFormat;
+  onPhotoFormatChange: (value: PhotoFormat) => void;
   photoQuality: PhotoQuality;
   onPhotoQualityChange: (value: PhotoQuality) => void;
   saveDualOutputs: boolean;
@@ -1123,6 +1186,8 @@ function SettingsModal({
   videoFps: VideoFps;
   videoFpsOptions: VideoFps[];
   onVideoFpsChange: (value: VideoFps) => void;
+  videoCodec: VideoCodecFormat;
+  onVideoCodecChange: (value: VideoCodecFormat) => void;
   videoQuality: VideoQuality;
   onVideoQualityChange: (value: VideoQuality) => void;
   viewMode: ViewMode;
@@ -1152,6 +1217,11 @@ function SettingsModal({
                     <Chip key={value} active={photoQuality === value} label={PHOTO_QUALITY_CONFIG[value].label} onPress={() => onPhotoQualityChange(value)} />
                   ))}
                 </SettingsSection>
+                <SettingsSection title="照片格式">
+                  {(['jpeg', 'heic'] as PhotoFormat[]).map(value => (
+                    <Chip key={value} active={photoFormat === value} label={PHOTO_FORMAT_CONFIG[value].label} onPress={() => onPhotoFormatChange(value)} />
+                  ))}
+                </SettingsSection>
                 <SettingsSection title="闪光灯">
                   <Chip active={flashMode === 'off'} label="关闭" onPress={() => onFlashModeChange('off')} />
                   <Chip active={flashMode === 'auto'} disabled={!device?.hasFlash} label="自动" onPress={() => onFlashModeChange('auto')} />
@@ -1168,6 +1238,11 @@ function SettingsModal({
                 <SettingsSection title="默认画质">
                   {(['720', '1080', '4K', '8K'] as VideoQuality[]).map(value => (
                     <Chip key={value} active={videoQuality === value} label={VIDEO_QUALITY_CONFIG[value].label} onPress={() => onVideoQualityChange(value)} />
+                  ))}
+                </SettingsSection>
+                <SettingsSection title="编码格式">
+                  {(['h265', 'h264'] as VideoCodecFormat[]).map(value => (
+                    <Chip key={value} active={videoCodec === value} label={VIDEO_CODEC_CONFIG[value].label} onPress={() => onVideoCodecChange(value)} />
                   ))}
                 </SettingsSection>
               </>
@@ -1212,7 +1287,16 @@ async function createPhotoVariant(filePath: string, variant: PhotoVariant, suffi
   if (variant === 'full' || !DualViewMedia?.createPhotoVariant) return toLocalPath(filePath);
   return DualViewMedia.createPhotoVariant(toLocalPath(filePath), variant, slugify(suffix));
 }
-async function createPhotoVariantForAspect(filePath: string, spec: VisibleFrameSpec, suffix: string): Promise<string> {
+async function createPhotoVariantForAspect(filePath: string, spec: VisibleFrameSpec, suffix: string, format: PhotoFormat = 'jpeg'): Promise<string> {
+  if (DualViewMedia?.createPhotoVariantWithAspectAndFormat) {
+    return DualViewMedia.createPhotoVariantWithAspectAndFormat(
+      toLocalPath(filePath),
+      slugify(`${suffix}_${spec.variant}`),
+      Math.round(spec.aspect * 10000),
+      10000,
+      format,
+    );
+  }
   if (DualViewMedia?.createPhotoVariantWithAspect) {
     return DualViewMedia.createPhotoVariantWithAspect(
       toLocalPath(filePath),
@@ -1223,9 +1307,39 @@ async function createPhotoVariantForAspect(filePath: string, spec: VisibleFrameS
   }
   return createPhotoVariant(filePath, spec.variant, suffix);
 }
-async function createVideoVariant(filePath: string, variant: PhotoVariant, suffix: string, targetSize: { width: number; height: number }): Promise<string> {
+async function createDualPhotoVariantsForAspects(filePath: string, mainSpec: VisibleFrameSpec, subSpec: VisibleFrameSpec, format: PhotoFormat = 'jpeg'): Promise<{ mainPath: string; subPath: string }> {
+  if (DualViewMedia?.createDualPhotoVariantsWithAspectsAndFormat) {
+    return DualViewMedia.createDualPhotoVariantsWithAspectsAndFormat(
+      toLocalPath(filePath),
+      slugify(`main_${mainSpec.variant}`),
+      Math.round(mainSpec.aspect * 10000),
+      10000,
+      slugify(`sub_${subSpec.variant}`),
+      Math.round(subSpec.aspect * 10000),
+      10000,
+      format,
+    );
+  }
+  if (DualViewMedia?.createDualPhotoVariantsWithAspects) {
+    return DualViewMedia.createDualPhotoVariantsWithAspects(
+      toLocalPath(filePath),
+      slugify(`main_${mainSpec.variant}`),
+      Math.round(mainSpec.aspect * 10000),
+      10000,
+      slugify(`sub_${subSpec.variant}`),
+      Math.round(subSpec.aspect * 10000),
+      10000,
+    );
+  }
+  const [mainPath, subPath] = await Promise.all([
+    createPhotoVariantForAspect(filePath, mainSpec, 'main'),
+    createPhotoVariantForAspect(filePath, subSpec, 'sub'),
+  ]);
+  return { mainPath, subPath };
+}
+async function createVideoVariant(filePath: string, variant: PhotoVariant, suffix: string, targetSize: { width: number; height: number }, codec: VideoCodecFormat = 'h265'): Promise<string> {
   if (!DualViewMedia?.createVideoVariant) return toLocalPath(filePath);
-  return DualViewMedia.createVideoVariant(toLocalPath(filePath), variant, slugify(suffix), targetSize.width, targetSize.height);
+  return DualViewMedia.createVideoVariant(toLocalPath(filePath), variant, slugify(suffix), targetSize.width, targetSize.height, codec);
 }
 function slugify(v: string): string { return v.replace(/[^\w-]+/g, '_') || 'media'; }
 function wait(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
@@ -1318,11 +1432,17 @@ function isAspectRatioId(value: unknown): value is AspectRatioId {
 function isPhotoQuality(value: unknown): value is PhotoQuality {
   return value === 'high' || value === 'standard' || value === 'low';
 }
+function isPhotoFormat(value: unknown): value is PhotoFormat {
+  return value === 'jpeg' || value === 'heic';
+}
 function isVideoQuality(value: unknown): value is VideoQuality {
   return value === '720' || value === '1080' || value === '4K' || value === '8K';
 }
 function isVideoFps(value: unknown): value is VideoFps {
   return value === 30 || value === 60;
+}
+function isVideoCodecFormat(value: unknown): value is VideoCodecFormat {
+  return value === 'h265' || value === 'h264';
 }
 function isViewMode(value: unknown): value is ViewMode {
   return value === 'single' || value === 'dual';
