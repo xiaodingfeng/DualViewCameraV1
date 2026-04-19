@@ -1672,10 +1672,28 @@ function SettingsModal({
   viewMode: ViewMode;
 }) {
   const [tab, setTab] = useState<SettingsTab>('photo');
+
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) => {
+      // 只有明显的向下滑动（dy > 15）且侧向位移小时才拦截
+      return gestureState.dy > 15 && Math.abs(gestureState.dx) < 15;
+    },
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dy > 80 || gestureState.vy > 0.5) {
+        onClose();
+      }
+    },
+  }), [onClose]);
+
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
-      <Pressable style={styles.modalShade} onPress={onClose}>
-        <View style={styles.settingsPanel} onStartShouldSetResponder={() => true}>
+      <View style={styles.modalShade}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View 
+          style={styles.settingsPanel} 
+          {...panResponder.panHandlers}
+        >
           <View style={styles.settingsHeader}>
             <Text style={styles.settingsTitle}>设置</Text>
             <Pressable onPress={onClose}><Text style={styles.closeText}>完成</Text></Pressable>
@@ -1688,7 +1706,7 @@ function SettingsModal({
               <Text style={[styles.settingsTabText, tab === 'video' && styles.settingsTabTextActive]}>录像</Text>
             </Pressable>
           </View>
-          <ScrollView>
+          <ScrollView showsVerticalScrollIndicator={false}>
             {tab === 'photo' ? (
               <>
                 <SettingsSection title="照片质量">
@@ -1734,9 +1752,10 @@ function SettingsModal({
               <Text style={styles.settingLine}>镜头数量：{devicesCount}</Text>
               <Text style={styles.settingLine}>缩放：{device?.minZoom}x ~ {device?.maxZoom}x</Text>
             </SettingsSection>
+            <View style={{ height: 40 }} />
           </ScrollView>
         </View>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
