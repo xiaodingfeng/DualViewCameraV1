@@ -456,7 +456,7 @@ function CameraShell({
     device: device,
     outputs,
     constraints: cameraConstraints,
-    isActive: isAppActive,
+    isActive: isAppActive && !galleryOpen,
     orientationSource: 'device',
     getInitialZoom,
     onStarted: handleCameraStarted,
@@ -833,7 +833,7 @@ function CameraShell({
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      <StatusBar barStyle="light-content" hidden={galleryOpen} translucent backgroundColor="transparent" />
       <View style={styles.root}>
         <View
           style={styles.previewArea}
@@ -1140,11 +1140,12 @@ function GalleryModal({
   }, [current, onDelete]);
 
   return (
-    <Modal animationType="fade" onRequestClose={onClose} visible={open}>
+    <Modal animationType="fade" onRequestClose={onClose} statusBarTranslucent visible={open}>
       <View
         style={styles.galleryRoot}
         onLayout={event => setViewerWidth(event.nativeEvent.layout.width)}
       >
+        <StatusBar hidden translucent backgroundColor="transparent" />
         <View style={styles.galleryTopBar}>
           <Text style={styles.galleryCount}>{items.length > 0 ? `${index + 1}/${items.length}` : '0/0'}</Text>
         </View>
