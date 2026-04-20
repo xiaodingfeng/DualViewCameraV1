@@ -1,0 +1,483 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  GestureResponderEvent,
+  Image,
+  PanResponder,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { NativePreviewView } from 'react-native-vision-camera';
+
+import FlashAutoIcon from '../../assets/icons/flash-auto.svg';
+import FlashOffIcon from '../../assets/icons/flash-off.svg';
+import FlashOnIcon from '../../assets/icons/flash-on.svg';
+import SettingsIcon from '../../assets/icons/settings.svg';
+import SwitchCameraIcon from '../../assets/icons/switch.svg';
+
+import { ASPECT_RATIOS, PX_PER_ZOOM, VIDEO_QUALITY_CONFIG, ZOOM_BAR_WIDTH } from '../config/camera';
+import { styles } from '../styles/cameraStyles';
+import type {
+  AspectRatioId,
+  CaptureMode,
+  FlashMode,
+  FrameOrientation,
+  LastMedia,
+  VideoFps,
+  VideoQuality,
+} from '../types/camera';
+import {
+  calculateContainedFrame,
+  clamp,
+  formatAspectLabel,
+  formatDuration,
+  nextFps,
+  nextVideoQuality,
+  pipFrameSize,
+} from '../utils/camera';
+
+export function PermissionScreen({ onRequest }: { onRequest: () => Promise<boolean> }) {
+  return (
+    <SafeAreaView style={styles.centerScreen}>
+      <Text style={styles.title}>需要相机权限</Text>
+      <Text style={styles.description}>请授权相机权限，用于实时预览、拍照和录像。</Text>
+      <Pressable style={styles.primaryButton} onPress={onRequest}>
+        <Text style={styles.primaryButtonText}>授权相机</Text>
+      </Pressable>
+    </SafeAreaView>
+  );
+}
+
+export function EmptyCameraScreen({
+  position,
+  onSwitchCamera,
+}: {
+  position: 'back' | 'front';
+  onSwitchCamera: () => void;
+}) {
+  return (
+    <SafeAreaView style={styles.centerScreen}>
+      <Text style={styles.title}>未找到{position === 'back' ? '后置' : '前置'}摄像头</Text>
+      <Pressable style={styles.primaryButton} onPress={onSwitchCamera}>
+        <Text style={styles.primaryButtonText}>切换摄像头</Text>
+      </Pressable>
+    </SafeAreaView>
+  );
+}
+
+export function PreviewStatusOverlay({ issue }: { issue: string; mode: string }) {
+  return (
+    <View pointerEvents="none" style={styles.previewStatus}>
+      <Text style={styles.previewStatusTitle}>{issue ? '预览异常' : '正在启动相机'}</Text>
+      <Text style={styles.previewStatusText}>{issue || '正在绑定 CameraX 输出，请稍候。'}</Text>
+    </View>
+  );
+}
+
+export function FocusBox({ point }: { point: { x: number; y: number } }) {
+  return <View pointerEvents="none" style={[styles.focusBox, { left: point.x - 36, top: point.y - 36 }]} />;
+}
+
+export function TopBar({
+  aspectId,
+  aspectOptions,
+  captureMode,
+  flashMode,
+  isRecording,
+  onAspectChange,
+  onCycleFlash,
+  onOpenSettings,
+  onVideoFpsChange,
+  onVideoQualityChange,
+  recordingSeconds,
+  videoFps,
+  videoFpsOptions,
+  videoQuality,
+}: {
+  aspectId: AspectRatioId;
+  aspectOptions: typeof ASPECT_RATIOS;
+  captureMode: CaptureMode;
+  flashMode: FlashMode;
+  isRecording: boolean;
+  onAspectChange: (value: AspectRatioId) => void;
+  onCycleFlash: () => void;
+  onOpenSettings: () => void;
+  onVideoFpsChange: (value: VideoFps) => void;
+  onVideoQualityChange: (value: VideoQuality) => void;
+  recordingSeconds: number;
+  videoFps: VideoFps;
+  videoFpsOptions: VideoFps[];
+  videoQuality: VideoQuality;
+}) {
+  const FlashIcon = flashMode === 'off' ? FlashOffIcon : flashMode === 'auto' ? FlashAutoIcon : FlashOnIcon;
+
+  return (
+    <View style={styles.topBar} pointerEvents="box-none">
+      <View style={styles.topSide} />
+      <View style={styles.topCenter} pointerEvents="box-none">
+        {isRecording ? (
+          <Text style={styles.recordingTime}>{formatDuration(recordingSeconds)}</Text>
+        ) : captureMode === 'video' ? (
+          <View style={styles.topVideoControls}>
+            <View style={styles.topVideoPills}>
+              <Pressable style={styles.topPill} onPress={() => onVideoFpsChange(nextFps(videoFps, videoFpsOptions))}>
+                <Text style={styles.topPillText}>{videoFps}HZ</Text>
+              </Pressable>
+              <Pressable style={styles.topPill} onPress={() => onVideoQualityChange(nextVideoQuality(videoQuality))}>
+                <Text style={styles.topPillText}>{VIDEO_QUALITY_CONFIG[videoQuality].label}</Text>
+              </Pressable>
+            </View>
+            <View style={styles.aspectRow}>
+              {aspectOptions.map(option => (
+                <Pressable
+                  key={option.id}
+                  style={[styles.aspectButton, aspectId === option.id && styles.aspectButtonActive]}
+                  onPress={() => onAspectChange(option.id)}
+                >
+                  <Text style={[styles.aspectText, aspectId === option.id && styles.aspectTextActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : (
+          <View style={styles.aspectRow}>
+            {aspectOptions.map(option => (
+              <Pressable
+                key={option.id}
+                style={[styles.aspectButton, aspectId === option.id && styles.aspectButtonActive]}
+                onPress={() => onAspectChange(option.id)}
+              >
+                <Text style={[styles.aspectText, aspectId === option.id && styles.aspectTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+      </View>
+      <View style={styles.topActions}>
+        <RoundButton label="" active={flashMode !== 'off'} onPress={onCycleFlash} style={styles.noBorderButton}>
+          <FlashIcon width={28} height={28} />
+        </RoundButton>
+        <RoundButton label="" onPress={onOpenSettings} style={styles.noBorderButton}>
+          <SettingsIcon width={28} height={28} />
+        </RoundButton>
+      </View>
+    </View>
+  );
+}
+
+export function BottomControls({
+  captureMode,
+  isBusy,
+  isRecording,
+  lastMedia,
+  onCaptureModeChange,
+  onGalleryPress,
+  onPrimaryAction,
+  onSwitchCamera,
+  onViewModeChange,
+  viewMode,
+}: {
+  captureMode: CaptureMode;
+  isBusy: boolean;
+  isRecording: boolean;
+  lastMedia: LastMedia;
+  onCaptureModeChange: (mode: CaptureMode) => void;
+  onGalleryPress: () => void;
+  onPrimaryAction: () => void;
+  onSwitchCamera: () => void;
+  onViewModeChange: (mode: 'single' | 'dual') => void;
+  viewMode: 'single' | 'dual';
+}) {
+  return (
+    <View style={styles.bottomControls} pointerEvents="box-none">
+      <View style={styles.modeRow}>
+        <Text onPress={() => onCaptureModeChange('photo')} style={[styles.modeText, captureMode === 'photo' && styles.modeTextActive]}>拍照</Text>
+        <Text onPress={() => onCaptureModeChange('video')} style={[styles.modeText, captureMode === 'video' && styles.modeTextActive]}>录像</Text>
+      </View>
+      <View style={styles.actionRow}>
+        <Pressable style={styles.thumbnailButton} onPress={onGalleryPress}>
+          {lastMedia?.type === 'photo' ? (
+            <Image source={{ uri: lastMedia.uri }} style={styles.thumbnailImage} />
+          ) : (
+            <Text style={styles.thumbnailText}>{lastMedia ? '视频' : ''}</Text>
+          )}
+        </Pressable>
+        <Pressable
+          disabled={isBusy}
+          style={[styles.shutter, isRecording && styles.shutterRecording]}
+          onPress={onPrimaryAction}
+        >
+          <View style={[styles.shutterInner, isRecording && styles.shutterInnerRecording]} />
+        </Pressable>
+        <RoundButton label="" onPress={onSwitchCamera} style={styles.noBorderButton}>
+          <SwitchCameraIcon width={32} height={32} />
+        </RoundButton>
+      </View>
+      <View style={styles.viewModeRow}>
+        <Pressable style={styles.viewModeButton} onPress={() => onViewModeChange('single')}>
+          <Text style={[styles.viewModeText, viewMode === 'single' && styles.viewModeTextActive]}>单画面</Text>
+        </Pressable>
+        <Pressable style={styles.viewModeButton} onPress={() => onViewModeChange('dual')}>
+          <Text style={[styles.viewModeText, viewMode === 'dual' && styles.viewModeTextActive]}>双画面</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+export function PipPreview({
+  aspectRatio,
+  isSwapped,
+  orientation,
+  onPress,
+  previewOutput,
+  sessionRevision,
+  placeholderMode,
+}: {
+  aspectRatio: number;
+  isSwapped: boolean;
+  orientation: FrameOrientation;
+  onPress: () => void;
+  previewOutput: any | null;
+  sessionRevision: number;
+  placeholderMode: 'photo' | 'video' | null;
+}) {
+  const pipSize = useMemo(() => pipFrameSize(aspectRatio), [aspectRatio]);
+  const placeholderTitle = placeholderMode === 'photo' ? '拍照中' : '录制中';
+
+  return (
+    <View style={[styles.pip, pipSize]}>
+      {previewOutput ? (
+        <NativePreviewView
+          key={`pip-${sessionRevision}`}
+          style={StyleSheet.absoluteFill}
+          previewOutput={previewOutput}
+          resizeMode="cover"
+          implementationMode="compatible"
+        />
+      ) : (
+        <View style={styles.pipPlaceholder}>
+          {placeholderMode ? (
+            <>
+              <Text style={styles.pipPlaceholderTitle}>{placeholderTitle}</Text>
+              <Text style={styles.pipPlaceholderText}>副画面按保存构图输出</Text>
+            </>
+          ) : (
+            <Text style={styles.pipPlaceholderText}>副画面</Text>
+          )}
+        </View>
+      )}
+      <Text style={styles.pipLabel}>
+        {placeholderMode ? placeholderTitle : isSwapped ? '主画面' : `副 ${formatAspectLabel(aspectRatio)}`}
+      </Text>
+      <Pressable style={styles.pipTouchLayer} onPress={onPress} />
+    </View>
+  );
+}
+
+export function MainPreview({
+  bottomOffset,
+  fillScreen,
+  frame,
+  hybridRef,
+  orientation,
+  aspectRatio,
+  previewOutput,
+  sessionRevision,
+  topOffset,
+  isTransitioning,
+}: {
+  fillScreen: boolean;
+  bottomOffset: number;
+  frame: { width: any; height: any };
+  hybridRef: unknown;
+  orientation: FrameOrientation;
+  aspectRatio?: number;
+  previewOutput: any;
+  sessionRevision: number;
+  topOffset: number;
+  isTransitioning: boolean;
+}) {
+  const centerStyle = useMemo(
+    () => [styles.mainPreviewCenter, { top: topOffset, bottom: bottomOffset }],
+    [bottomOffset, topOffset],
+  );
+
+  const slotStyle = useMemo(() => {
+    if (fillScreen) {
+      return styles.mainFullSlot;
+    }
+    return [styles.mainContainedSlot, frame];
+  }, [fillScreen, frame]);
+
+  return (
+    <View pointerEvents="none" style={centerStyle}>
+      <View style={slotStyle}>
+        <NativePreviewView
+          key={`main-${sessionRevision}`}
+          style={StyleSheet.absoluteFill}
+          previewOutput={previewOutput}
+          resizeMode="cover"
+          implementationMode="compatible"
+          hybridRef={hybridRef as never}
+        />
+        {isTransitioning && (
+          <View style={[StyleSheet.absoluteFill, styles.transitionOverlay]}>
+            <View style={styles.transitionLogo}>
+              <Text style={styles.transitionLogoText}>Agile</Text>
+            </View>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+export function ZoomSelector({
+  currentZoom,
+  onChange,
+  minZoom,
+  maxZoom,
+  isRulerMode,
+  setIsRulerMode,
+}: {
+  currentZoom: number;
+  onChange: (z: number) => void;
+  minZoom: number;
+  maxZoom: number;
+  isRulerMode: boolean;
+  setIsRulerMode: (m: boolean) => void;
+}) {
+  const startZoomRef = useRef(currentZoom);
+  const zoomRef = useRef(currentZoom);
+  const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const options = useMemo(() => [0.6, 1, 2, 2.5, 5].filter(v => v >= minZoom && v <= maxZoom), [minZoom, maxZoom]);
+
+  useEffect(() => {
+    zoomRef.current = currentZoom;
+  }, [currentZoom]);
+
+  const clearTimer = () => {
+    if (restoreTimer.current) {
+      clearTimeout(restoreTimer.current);
+      restoreTimer.current = null;
+    }
+  };
+
+  const startTimer = () => {
+    clearTimer();
+    restoreTimer.current = setTimeout(() => setIsRulerMode(false), 500);
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        startZoomRef.current = zoomRef.current;
+        clearTimer();
+      },
+      onPanResponderMove: (_, gesture) => {
+        if (!isRulerMode && Math.abs(gesture.dx) < 12) return;
+        if (!isRulerMode) setIsRulerMode(true);
+        clearTimer();
+        const delta = -(gesture.dx / PX_PER_ZOOM);
+        const next = clamp(startZoomRef.current + delta, minZoom, maxZoom);
+        onChange(Math.round(next * 10) / 10);
+      },
+      onPanResponderRelease: () => {
+        if (isRulerMode) startTimer();
+      },
+      onPanResponderTerminate: () => setIsRulerMode(false),
+    }),
+  ).current;
+
+  const tickStep = PX_PER_ZOOM * 0.1;
+  const stripLeft = ZOOM_BAR_WIDTH / 2 - (currentZoom - minZoom) * PX_PER_ZOOM - tickStep / 2;
+  const markers = useMemo(() => {
+    const items = [];
+    for (let i = 0; i <= (maxZoom - minZoom) * 10; i += 1) items.push(minZoom + i * 0.1);
+    return items;
+  }, [minZoom, maxZoom]);
+
+  return (
+    <View style={styles.zoomBarShell} {...panResponder.panHandlers}>
+      {isRulerMode ? (
+        <View style={styles.rulerContainer}>
+          <View style={[styles.rulerStrip, { left: stripLeft }]}>
+            {markers.map(val => (
+              <View key={val.toFixed(1)} style={[styles.markerGroup, { width: tickStep }]}>
+                <View
+                  style={[
+                    styles.tick,
+                    Math.abs(val % 0.5) < 0.01 && styles.tickHalf,
+                    Math.abs(val % 1) < 0.01 && styles.tickMajor,
+                  ]}
+                />
+                {Math.abs(val % 1) < 0.01 && <Text style={styles.tickLabel}>{val.toFixed(0)}</Text>}
+              </View>
+            ))}
+          </View>
+          <View style={styles.centerPointer} />
+          <View style={styles.valueFloat}>
+            <Text style={styles.floatingValue}>{currentZoom.toFixed(1)}x</Text>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.optionsRow}>
+          {options.map(val => (
+            <Pressable
+              key={val}
+              onPress={() => onChange(val)}
+              onLongPress={() => setIsRulerMode(true)}
+              style={styles.optionItem}
+            >
+              <Text style={[styles.optionText, Math.abs(currentZoom - val) < 0.05 && styles.activeText]}>
+                {val === currentZoom ? `${val}x` : val}
+              </Text>
+            </Pressable>
+          ))}
+          {!options.some(v => Math.abs(currentZoom - v) < 0.05) && (
+            <View style={styles.optionItem}>
+              <Text style={[styles.optionText, styles.activeText]}>{currentZoom.toFixed(1)}x</Text>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+export function Toast({ message }: { message: string }) {
+  return (
+    <View style={styles.toast} pointerEvents="none">
+      <Text style={styles.toastText}>{message}</Text>
+    </View>
+  );
+}
+
+export function RoundButton({
+  active = false,
+  label,
+  onPress,
+  style,
+  children,
+}: {
+  active?: boolean;
+  label: string;
+  onPress: () => void;
+  style?: any;
+  children?: React.ReactNode;
+}) {
+  return (
+    <Pressable style={[styles.roundButton, active && styles.roundButtonActive, style]} onPress={onPress}>
+      {children ? children : <Text style={styles.roundButtonText}>{label}</Text>}
+    </Pressable>
+  );
+}

@@ -17,7 +17,7 @@
     "react-native-fs": "^2.20.0",
     "react-native-nitro-image": "0.13.1",
     "react-native-nitro-modules": "0.35.4",
-    "react-native-safe-area-context": "^5.5.2",
+    "react-native-safe-area-context": "^5.7.0",
     "react-native-svg": "^15.15.4",
     "react-native-svg-transformer": "^1.5.3",
     "react-native-vision-camera": "5.0.1"

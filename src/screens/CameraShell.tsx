@@ -1,0 +1,1048 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  AppState,
+  BackHandler,
+  GestureResponderEvent,
+  Pressable,
+  StatusBar,
+  View,
+} from 'react-native';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
+import { callback } from 'react-native-nitro-modules';
+import {
+  CommonResolutions,
+  type CameraDevice,
+  type CameraPosition,
+  type PreviewView,
+  type Recorder,
+  useCamera,
+  useOrientation,
+  usePhotoOutput,
+  usePreviewOutput,
+  useVideoOutput,
+} from 'react-native-vision-camera';
+
+import {
+  ASPECT_RATIOS,
+  LANDSCAPE_MAIN_BOTTOM_OFFSET,
+  PHOTO_QUALITY_CONFIG,
+  PREVIEW_TOP_OFFSET,
+  VIDEO_QUALITY_CONFIG,
+} from '../config/camera';
+import {
+  BottomControls,
+  FocusBox,
+  MainPreview,
+  PipPreview,
+  PreviewStatusOverlay,
+  Toast,
+  TopBar,
+  ZoomSelector,
+} from '../components/CameraPrimitives';
+import { GalleryModal } from '../components/GalleryModal';
+import { SettingsModal } from '../components/SettingsModal';
+import { styles } from '../styles/cameraStyles';
+import type {
+  AspectRatioId,
+  CaptureMode,
+  FlashMode,
+  FrameOrientation,
+  GalleryMedia,
+  LastMedia,
+  PhotoFormat,
+  PhotoQuality,
+  VideoCodecFormat,
+  VideoFps,
+  VideoQuality,
+  ViewMode,
+  VisibleFrameSpec,
+} from '../types/camera';
+import {
+  calculateContainedFrame,
+  cameraErrorMessage,
+  clamp,
+  isCameraResourceBusyError,
+  safeSupportsFPS,
+  videoTargetSizeForAspect,
+  visibleFrameSpec,
+  wait,
+} from '../utils/camera';
+import {
+  cameraRollNodeToGalleryMedia,
+  createDualPhotoVariantsForAspects,
+  createPhotoVariantForAspect,
+  createVideoVariant,
+  ensureVideoExtension,
+  loadDualViewGallery,
+  mediaToLastMedia,
+  toFileUri,
+} from '../utils/gallery';
+import {
+  isAspectRatioId,
+  isPhotoFormat,
+  isPhotoQuality,
+  isVideoCodecFormat,
+  isVideoFps,
+  isVideoQuality,
+  isViewMode,
+  loadPersistedSettings,
+  savePersistedSettings,
+} from '../utils/settings';
+
+function CameraShell({
+                       cameraPosition,
+                       captureMode,
+                       device,
+                       devicesCount,
+                       isInitializing,
+                       microphoneReady,
+                       onCaptureModeChange,
+                       onSwitchCamera,
+                     }: {
+  cameraPosition: CameraPosition;
+  captureMode: CaptureMode;
+  device: CameraDevice;
+  devicesCount: number;
+  isInitializing: boolean;
+  microphoneReady: boolean;
+  onCaptureModeChange: (mode: CaptureMode) => void;
+  onSwitchCamera: () => void;
+}) {
+  const physicalOrientation = useOrientation('device');
+  const [selectedAspectId, setSelectedAspectId] = useState<AspectRatioId>('16:9');
+  const [photoQuality, setPhotoQuality] = useState<PhotoQuality>('high');
+  const [photoFormat, setPhotoFormat] = useState<PhotoFormat>('jpeg');
+  const [videoFps, setVideoFps] = useState<VideoFps>(30);
+  const [videoQuality, setVideoQuality] = useState<VideoQuality>('4K');
+  const [videoCodec, setVideoCodec] = useState<VideoCodecFormat>('h265');
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+
+  const selectedAspect = useMemo(
+      () => ASPECT_RATIOS.find(item => item.id === selectedAspectId) ?? ASPECT_RATIOS[2],
+      [selectedAspectId],
+  );
+  const photoQualityConfig = PHOTO_QUALITY_CONFIG[photoQuality];
+  const videoQualityConfig = VIDEO_QUALITY_CONFIG[videoQuality];
+
+  const mainPreviewOutput = usePreviewOutput();
+  const pipPreviewOutput = usePreviewOutput();
+
+  const photoOutput = usePhotoOutput({
+    targetResolution:
+        photoQuality === 'high' ? CommonResolutions.HIGHEST_4_3 : CommonResolutions.UHD_4_3,
+    containerFormat: 'jpeg',
+    quality: photoQualityConfig.quality,
+    qualityPrioritization:
+        photoQualityConfig.priority === 'speed' && !device.supportsSpeedQualityPrioritization
+            ? 'balanced'
+            : photoQualityConfig.priority,
+  });
+
+  const videoOutput = useVideoOutput({
+    targetResolution: videoQualityConfig.resolution,
+    enableAudio: microphoneReady,
+    enablePersistentRecorder: false,
+  });
+
+  const previewRef = useRef<PreviewView | null>(null);
+  const recorderRef = useRef<Recorder | null>(null);
+  const cameraReopenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumePreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const initialAppState = AppState.currentState;
+  const startsActive = initialAppState !== 'background' && initialAppState !== 'inactive';
+  const appStateRef = useRef(initialAppState);
+  const hasEnteredBackgroundRef = useRef(false);
+
+  const [viewMode, setViewMode] = useState<ViewMode>('single');
+  const [flashMode, setFlashMode] = useState<FlashMode>('off');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saveDualOutputs, setSaveDualOutputs] = useState(true);
+
+  const [zoom, setZoom] = useState(() => clamp(1, device.minZoom, device.maxZoom));
+  const [isRulerMode, setIsRulerMode] = useState(false);
+
+  const [isBusy, setIsBusy] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isSwapped, setIsSwapped] = useState(false);
+  const [lastMedia, setLastMedia] = useState<LastMedia>(null);
+  const [toast, setToast] = useState('');
+  const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
+  const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
+  const [pendingPhotoCapture, setPendingPhotoCapture] = useState(false);
+  const [pendingVideoStart, setPendingVideoStart] = useState(false);
+  const [previewIssue, setPreviewIssue] = useState('');
+  const [isAppActive, setIsAppActive] = useState(startsActive);
+  const [sessionRevision, setSessionRevision] = useState(0);
+  const [galleryItems, setGalleryItems] = useState<GalleryMedia[]>([]);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryIndex, setGalleryIndex] = useState(0);
+  const [isSwitching, setIsSwitching] = useState(false);
+
+  useEffect(() => {
+    setIsSwitching(true);
+    const timer = setTimeout(() => setIsSwitching(false), 500);
+    return () => clearTimeout(timer);
+  }, [captureMode, viewMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadPersistedSettings()
+        .then(settings => {
+          if (cancelled) return;
+
+          if (isAspectRatioId(settings.selectedAspectId)) setSelectedAspectId(settings.selectedAspectId);
+          if (isPhotoQuality(settings.photoQuality)) setPhotoQuality(settings.photoQuality);
+          if (isPhotoFormat(settings.photoFormat)) setPhotoFormat(settings.photoFormat);
+          if (isVideoFps(settings.videoFps)) setVideoFps(settings.videoFps);
+          if (isVideoQuality(settings.videoQuality)) setVideoQuality(settings.videoQuality);
+          if (isVideoCodecFormat(settings.videoCodec)) setVideoCodec(settings.videoCodec);
+          if (isViewMode(settings.viewMode)) setViewMode(settings.viewMode);
+          if (typeof settings.saveDualOutputs === 'boolean') setSaveDualOutputs(settings.saveDualOutputs);
+        })
+        .finally(() => {
+          if (!cancelled) setSettingsLoaded(true);
+        });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+
+    savePersistedSettings({
+      selectedAspectId,
+      photoQuality,
+      photoFormat,
+      videoFps,
+      videoQuality,
+      videoCodec,
+      viewMode,
+      saveDualOutputs,
+    }).catch(() => {});
+  }, [
+    photoFormat,
+    photoQuality,
+    saveDualOutputs,
+    selectedAspectId,
+    settingsLoaded,
+    videoCodec,
+    videoFps,
+    videoQuality,
+    viewMode,
+  ]);
+
+  const isDeviceLandscape = physicalOrientation?.startsWith('landscape') ?? false;
+  const defaultSubOrientation: FrameOrientation = isDeviceLandscape ? 'portrait' : 'landscape';
+
+  const mainDisplayOrientation: FrameOrientation =
+      viewMode === 'dual'
+          ? (isSwapped ? defaultSubOrientation : 'portrait')
+          : (isDeviceLandscape ? 'landscape' : 'portrait');
+
+  const subDisplayOrientation: FrameOrientation =
+      viewMode === 'dual'
+          ? (isSwapped ? 'portrait' : defaultSubOrientation)
+          : defaultSubOrientation;
+
+  const fullMainAspect =
+      previewSize.width > 0 && previewSize.height > 0
+          ? previewSize.width / Math.max(1, previewSize.height)
+          : 9 / 16;
+
+  const mainFrameSpec = useMemo(
+      () => visibleFrameSpec(mainDisplayOrientation, selectedAspect, fullMainAspect),
+      [fullMainAspect, mainDisplayOrientation, selectedAspect],
+  );
+
+  const subFrameSpec = useMemo(
+      () => visibleFrameSpec(subDisplayOrientation, selectedAspect, 3 / 4),
+      [selectedAspect, subDisplayOrientation],
+  );
+
+  const isFullPreview =
+      selectedAspectId === 'full' &&
+      ((viewMode === 'single' && !isDeviceLandscape) || (viewMode === 'dual' && mainDisplayOrientation === 'portrait'));
+
+  const mainPreviewAspect = mainFrameSpec.aspect;
+  const previewTopOffset = isFullPreview ? 0 : PREVIEW_TOP_OFFSET;
+  const mainPreviewBottomOffset =
+      !isFullPreview && mainDisplayOrientation === 'landscape' ? LANDSCAPE_MAIN_BOTTOM_OFFSET : 0;
+
+  const mainPreviewFrame = useMemo(
+      () =>
+          calculateContainedFrame(
+              previewSize.width,
+              Math.max(0, previewSize.height - previewTopOffset - mainPreviewBottomOffset),
+              mainPreviewAspect,
+          ),
+      [mainPreviewAspect, mainPreviewBottomOffset, previewSize.height, previewSize.width, previewTopOffset],
+  );
+
+  const videoFpsOptions = useMemo<VideoFps[]>(() => {
+    const supports60 = safeSupportsFPS(device, 60);
+    return supports60 ? [30, 60] : [30];
+  }, [device]);
+
+  const videoFrameSize = useCallback(
+      (spec: VisibleFrameSpec) => videoTargetSizeForAspect(spec.aspect, videoQualityConfig),
+      [videoQualityConfig],
+  );
+
+  const outputs = useMemo(() => {
+    if (captureMode === 'photo') {
+      if (viewMode === 'dual' && !pendingPhotoCapture) {
+        return [mainPreviewOutput, pipPreviewOutput];
+      }
+      return [mainPreviewOutput, photoOutput];
+    }
+
+    if (viewMode === 'dual' && !isRecording && !pendingVideoStart) {
+      return [mainPreviewOutput, pipPreviewOutput];
+    }
+
+    return [mainPreviewOutput, videoOutput];
+  }, [
+    captureMode,
+    isRecording,
+    mainPreviewOutput,
+    pendingPhotoCapture,
+    pendingVideoStart,
+    pipPreviewOutput,
+    photoOutput,
+    videoOutput,
+    viewMode,
+  ]);
+
+  const cameraConstraints = useMemo(() => {
+    if (captureMode !== 'video') {
+      return [{ resolutionBias: photoOutput }];
+    }
+    return [{ fps: videoFps }, { resolutionBias: videoOutput }];
+  }, [captureMode, photoOutput, videoFps, videoOutput]);
+
+  const initialZoomRef = useRef(zoom);
+
+  const previewHybridRef = useMemo(
+      () =>
+          callback((preview: PreviewView) => {
+            previewRef.current = preview;
+          }),
+      [],
+  );
+
+  const scheduleCameraReopen = useCallback(() => {
+    if (cameraReopenTimerRef.current != null) {
+      clearTimeout(cameraReopenTimerRef.current);
+    }
+
+    setIsAppActive(false);
+    cameraReopenTimerRef.current = setTimeout(() => {
+      cameraReopenTimerRef.current = null;
+      setSessionRevision(curr => curr + 1);
+      setIsAppActive(true);
+    }, 450);
+  }, []);
+
+  const scheduleResumePreviewRefresh = useCallback(() => {
+    if (resumePreviewTimerRef.current != null) {
+      clearTimeout(resumePreviewTimerRef.current);
+    }
+
+    resumePreviewTimerRef.current = setTimeout(() => {
+      resumePreviewTimerRef.current = null;
+      if (appStateRef.current !== 'active') return;
+      setSessionRevision(curr => curr + 1);
+    }, 260);
+  }, []);
+
+  useEffect(() => {
+    initialZoomRef.current = zoom;
+  }, [zoom]);
+
+  const getInitialZoom = useCallback(() => initialZoomRef.current, []);
+
+  const handleCameraStarted = useCallback(() => {
+    setPreviewIssue('');
+  }, []);
+
+  const handleCameraError = useCallback(
+      (error: Error) => {
+        if (isCameraResourceBusyError(error)) {
+          setPreviewIssue('');
+          scheduleCameraReopen();
+          return;
+        }
+
+        const message = cameraErrorMessage(error, '相机错误');
+        setPreviewIssue(message);
+      },
+      [scheduleCameraReopen],
+  );
+
+  const handleCameraInterruptionEnded = useCallback(() => {
+    setPreviewIssue('');
+  }, []);
+
+  const cameraController = useCamera({
+    device,
+    outputs,
+    constraints: cameraConstraints,
+    isActive: isAppActive && !galleryOpen,
+    orientationSource: 'device',
+    getInitialZoom,
+    onStarted: handleCameraStarted,
+    onError: handleCameraError,
+    onInterruptionEnded: handleCameraInterruptionEnded,
+  });
+
+  useEffect(() => {
+    if (!device) return;
+
+    setZoom(clamp(1, device.minZoom, device.maxZoom));
+    setFlashMode('off');
+    setIsSwapped(false);
+    setIsRulerMode(false);
+    setPreviewIssue('');
+
+    if (!safeSupportsFPS(device, videoFps)) {
+      setVideoFps(30);
+    }
+  }, [device?.id, device, videoFps]);
+
+  useEffect(() => {
+    if (captureMode === 'video') {
+      setFlashMode('off');
+    }
+  }, [captureMode]);
+
+  useEffect(() => {
+    if (!isRecording || recordingStartedAt == null) {
+      setRecordingSeconds(0);
+      return;
+    }
+
+    const update = () => {
+      setRecordingSeconds(Math.max(0, Math.floor((Date.now() - recordingStartedAt) / 1000)));
+    };
+
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [isRecording, recordingStartedAt]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      const active = nextState === 'active';
+      const wasActive = appStateRef.current === 'active';
+      appStateRef.current = nextState;
+
+      if (active) {
+        setPreviewIssue('');
+        if (!wasActive) {
+          setIsAppActive(true);
+          if (hasEnteredBackgroundRef.current) {
+            hasEnteredBackgroundRef.current = false;
+            scheduleResumePreviewRefresh();
+          }
+        }
+      } else {
+        hasEnteredBackgroundRef.current = true;
+
+        if (cameraReopenTimerRef.current != null) {
+          clearTimeout(cameraReopenTimerRef.current);
+          cameraReopenTimerRef.current = null;
+        }
+
+        if (resumePreviewTimerRef.current != null) {
+          clearTimeout(resumePreviewTimerRef.current);
+          resumePreviewTimerRef.current = null;
+        }
+
+        setIsAppActive(false);
+      }
+    });
+
+    return () => subscription.remove();
+  }, [scheduleResumePreviewRefresh]);
+
+  useEffect(() => {
+    return () => {
+      if (cameraReopenTimerRef.current != null) {
+        clearTimeout(cameraReopenTimerRef.current);
+      }
+      if (resumePreviewTimerRef.current != null) {
+        clearTimeout(resumePreviewTimerRef.current);
+      }
+      if (zoomFocusTimerRef.current != null) {
+        clearTimeout(zoomFocusTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (cameraController == null || typeof (cameraController as any).setZoom !== 'function') return;
+    (cameraController as any).setZoom(clamp(zoom, device.minZoom, device.maxZoom)).catch(() => {});
+  }, [cameraController, zoom, device.minZoom, device.maxZoom]);
+
+  useEffect(() => {
+    if (cameraController == null || typeof (cameraController as any).setTorchMode !== 'function') return;
+    const shouldEnableTorch = captureMode === 'video' && flashMode === 'on' && device.hasTorch;
+    (cameraController as any)
+        .setTorchMode(shouldEnableTorch ? 'on' : 'off', shouldEnableTorch ? 1 : undefined)
+        .catch(() => {});
+  }, [cameraController, captureMode, device.hasTorch, flashMode]);
+
+  useEffect(() => {
+    if (
+        cameraController == null ||
+        previewRef.current == null ||
+        previewSize.width <= 0 ||
+        previewSize.height <= 0
+    ) {
+      return;
+    }
+
+    if (zoomFocusTimerRef.current != null) {
+      clearTimeout(zoomFocusTimerRef.current);
+    }
+
+    zoomFocusTimerRef.current = setTimeout(() => {
+      zoomFocusTimerRef.current = null;
+      if (previewRef.current == null) return;
+
+      try {
+        const point = previewRef.current.createMeteringPoint(
+            previewSize.width / 2,
+            previewSize.height / 2,
+            96,
+        );
+
+        cameraController
+            .focusTo(point, {
+              responsiveness: 'steady',
+              adaptiveness: 'continuous',
+              autoResetAfter: 3,
+            })
+            .catch(() => {});
+      } catch {}
+    }, zoom >= 2 ? 180 : 320);
+
+    return () => {
+      if (zoomFocusTimerRef.current != null) {
+        clearTimeout(zoomFocusTimerRef.current);
+      }
+    };
+  }, [cameraController, previewSize.height, previewSize.width, zoom]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(''), 2600);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const refreshGallery = useCallback(async () => {
+    const items = await loadDualViewGallery();
+    setGalleryItems(items);
+    setLastMedia(mediaToLastMedia(items[0] ?? null));
+    setGalleryIndex(current => (items.length === 0 ? 0 : Math.min(current, items.length - 1)));
+    return items;
+  }, []);
+
+  useEffect(() => {
+    refreshGallery().catch(() => {});
+  }, [refreshGallery]);
+
+  useEffect(() => {
+    if (!isAppActive) return;
+    refreshGallery().catch(() => {});
+  }, [isAppActive, refreshGallery]);
+
+  useEffect(() => {
+    if (!galleryOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setGalleryOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [galleryOpen]);
+
+  const saveToGallery = useCallback(
+      async (filePath: string, type: 'photo' | 'video', label: string) => {
+        const sourcePath = type === 'video' ? await ensureVideoExtension(filePath, label) : filePath;
+        const uri = toFileUri(sourcePath);
+        const saved = await CameraRoll.saveAsset(uri, { type, album: 'DualViewCamera' });
+        setLastMedia(mediaToLastMedia(cameraRollNodeToGalleryMedia(saved)));
+        refreshGallery().catch(() => {});
+        return saved.node.image.uri;
+      },
+      [refreshGallery],
+  );
+
+  const saveCapturedPhotoInBackground = useCallback(
+      (
+          filePath: string,
+          options: {
+            mainSpec: VisibleFrameSpec;
+            subSpec: VisibleFrameSpec;
+            dual: boolean;
+            format: PhotoFormat;
+            quality: number;
+          },
+      ) => {
+        void (async () => {
+          try {
+            if (options.dual) {
+              const { mainPath, subPath } = await createDualPhotoVariantsForAspects(
+                  filePath,
+                  options.mainSpec,
+                  options.subSpec,
+                  options.format,
+                  options.quality,
+              );
+
+              await Promise.all([
+                saveToGallery(mainPath, 'photo', '主画面'),
+                saveToGallery(subPath, 'photo', '副画面'),
+              ]);
+            } else {
+              const mainPath = await createPhotoVariantForAspect(
+                  filePath,
+                  options.mainSpec,
+                  'main',
+                  options.format,
+                  options.quality,
+              );
+              await saveToGallery(mainPath, 'photo', '主画面');
+            }
+          } catch (error) {
+            setToast(cameraErrorMessage(error, '照片保存失败'));
+          }
+        })();
+      },
+      [saveToGallery],
+  );
+
+  const prepareFlashForPhoto = useCallback(async () => {
+    if (flashMode !== 'on' || cameraController == null || !device?.hasTorch) return false;
+
+    try {
+      await cameraController.setTorchMode('on', 1);
+      await wait(160);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [cameraController, device?.hasTorch, flashMode]);
+
+  const cleanupFlashAfterPhoto = useCallback(
+      async (torchWasEnabled: boolean) => {
+        if (!torchWasEnabled || cameraController == null) return;
+        try {
+          await cameraController.setTorchMode('off');
+        } catch {}
+      },
+      [cameraController],
+  );
+
+  const takePhoto = useCallback(async () => {
+    if (isBusy || captureMode !== 'photo') return;
+
+    if (viewMode === 'dual' && !pendingPhotoCapture) {
+      setPendingPhotoCapture(true);
+      return;
+    }
+
+    setIsBusy(true);
+    const torchWasEnabled = await prepareFlashForPhoto();
+
+    try {
+      const file = await photoOutput.capturePhotoToFile(
+          {
+            flashMode: device?.hasFlash ? flashMode : 'off',
+            enableShutterSound: true,
+          },
+          {},
+      );
+
+      saveCapturedPhotoInBackground(file.filePath, {
+        mainSpec: mainFrameSpec,
+        subSpec: subFrameSpec,
+        dual: viewMode === 'dual' && saveDualOutputs,
+        format: photoFormat,
+        quality: photoQualityConfig.nativeQuality,
+      });
+    } catch (error) {
+      setToast(cameraErrorMessage(error, '拍照失败'));
+    } finally {
+      await cleanupFlashAfterPhoto(torchWasEnabled);
+      setIsBusy(false);
+      setPendingPhotoCapture(false);
+    }
+  }, [
+    captureMode,
+    cleanupFlashAfterPhoto,
+    device?.hasFlash,
+    flashMode,
+    isBusy,
+    mainFrameSpec,
+    pendingPhotoCapture,
+    photoFormat,
+    photoOutput,
+    photoQualityConfig.nativeQuality,
+    prepareFlashForPhoto,
+    saveCapturedPhotoInBackground,
+    saveDualOutputs,
+    subFrameSpec,
+    viewMode,
+  ]);
+
+  useEffect(() => {
+    if (!pendingPhotoCapture) return;
+    const timer = setTimeout(() => {
+      takePhoto();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [pendingPhotoCapture, takePhoto]);
+
+  const finishRecording = useCallback(
+      async (filePath: string) => {
+        try {
+          const mainVariant = mainFrameSpec.variant;
+          const mainPath = await createVideoVariant(
+              filePath,
+              mainVariant,
+              'main',
+              videoFrameSize(mainFrameSpec),
+              videoCodec,
+          );
+          await saveToGallery(mainPath, 'video', '主画面');
+
+          if (viewMode === 'dual' && saveDualOutputs) {
+            const subVariant = subFrameSpec.variant;
+            const subPath = await createVideoVariant(
+                filePath,
+                subVariant,
+                'sub',
+                videoFrameSize(subFrameSpec),
+                videoCodec,
+            );
+            await saveToGallery(subPath, 'video', '副画面');
+          }
+        } catch {
+          setToast('录像保存失败');
+        }
+      },
+      [mainFrameSpec, saveDualOutputs, saveToGallery, subFrameSpec, videoCodec, videoFrameSize, viewMode],
+  );
+
+  const toggleRecording = useCallback(async () => {
+    if (isBusy || captureMode !== 'video') return;
+
+    if (viewMode === 'dual' && !isRecording && !pendingVideoStart) {
+      setPendingVideoStart(true);
+      return;
+    }
+
+    setIsBusy(true);
+
+    try {
+      if (isRecording && recorderRef.current != null) {
+        await recorderRef.current.stopRecording();
+        return;
+      }
+
+      const recorder = await videoOutput.createRecorder({});
+      recorderRef.current = recorder;
+
+      await recorder.startRecording(
+          filePath => {
+            setIsRecording(false);
+            setRecordingStartedAt(null);
+            recorderRef.current = null;
+            setToast('录像已停止，正在后台保存');
+            finishRecording(filePath);
+          },
+          error => {
+            setIsRecording(false);
+            setRecordingStartedAt(null);
+            recorderRef.current = null;
+            setToast(error.message);
+          },
+      );
+
+      setIsRecording(true);
+      setRecordingStartedAt(Date.now());
+    } catch (error) {
+      setIsRecording(false);
+      setRecordingStartedAt(null);
+      setToast(cameraErrorMessage(error, '录像失败'));
+    } finally {
+      setIsBusy(false);
+      setPendingVideoStart(false);
+    }
+  }, [captureMode, finishRecording, isBusy, isRecording, pendingVideoStart, videoOutput, viewMode]);
+
+  useEffect(() => {
+    if (!pendingVideoStart) return;
+    const timer = setTimeout(() => {
+      toggleRecording();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [pendingVideoStart, toggleRecording]);
+
+  const focusAtPoint = useCallback(
+      async (event: GestureResponderEvent) => {
+        setIsRulerMode(false);
+        if (cameraController == null || previewRef.current == null) return;
+
+        const { locationX, locationY } = event.nativeEvent;
+
+        try {
+          const point = previewRef.current.createMeteringPoint(locationX, locationY, 80);
+          await cameraController.focusTo(point, {
+            responsiveness: 'snappy',
+            autoResetAfter: 4,
+          });
+          setFocusPoint({ x: locationX, y: locationY });
+        } catch {}
+      },
+      [cameraController],
+  );
+
+  const cycleFlash = useCallback(() => {
+    if (!device?.hasFlash && !device?.hasTorch) {
+      setToast('不支持闪光灯');
+      return;
+    }
+
+    if (captureMode === 'video') {
+      if (!device?.hasTorch) {
+        setToast('不支持常亮闪光灯');
+        return;
+      }
+      setFlashMode(current => (current === 'on' ? 'off' : 'on'));
+      return;
+    }
+
+    setFlashMode(current => (current === 'off' ? 'auto' : current === 'auto' ? 'on' : 'off'));
+  }, [captureMode, device?.hasFlash, device?.hasTorch]);
+
+  const swapMainAndSub = useCallback(() => {
+    setIsSwapped(current => !current);
+  }, []);
+
+  const openLastMedia = useCallback(() => {
+    if (galleryItems.length === 0) {
+      setToast('还没有拍摄内容');
+      return;
+    }
+    setGalleryIndex(0);
+    setGalleryOpen(true);
+    refreshGallery().catch(() => {});
+  }, [galleryItems.length, refreshGallery]);
+
+  const closeGallery = useCallback(() => {
+    setGalleryOpen(false);
+  }, []);
+
+  const handleGalleryDelete = useCallback(
+      async (item: GalleryMedia) => {
+        try {
+          await CameraRoll.deletePhotos([item.uri]);
+          const nextItems = galleryItems.filter(media => media.id !== item.id);
+          setGalleryItems(nextItems);
+          setLastMedia(mediaToLastMedia(nextItems[0] ?? null));
+
+          if (nextItems.length === 0) {
+            setGalleryOpen(false);
+            setGalleryIndex(0);
+          } else {
+            setGalleryIndex(current => Math.min(current, nextItems.length - 1));
+          }
+
+          setToast('已删除');
+          refreshGallery().catch(() => {});
+        } catch (error) {
+          setToast(cameraErrorMessage(error, '删除失败'));
+        }
+      },
+      [galleryItems, refreshGallery],
+  );
+
+  const lastPinchDist = useRef<number | null>(null);
+
+  const onTouchMove = useCallback(
+      (event: GestureResponderEvent) => {
+        if (event.nativeEvent.touches.length === 2) {
+          const t1 = event.nativeEvent.touches[0];
+          const t2 = event.nativeEvent.touches[1];
+          const dist = Math.sqrt(Math.pow(t1.pageX - t2.pageX, 2) + Math.pow(t1.pageY - t2.pageY, 2));
+
+          if (lastPinchDist.current != null) {
+            const delta = (dist - lastPinchDist.current) / 30;
+            setZoom(z => clamp(z + delta, device.minZoom, device.maxZoom));
+          }
+
+          lastPinchDist.current = dist;
+        }
+      },
+      [device.maxZoom, device.minZoom],
+  );
+
+  const primaryAction = captureMode === 'photo' ? takePhoto : toggleRecording;
+
+  return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="light-content" hidden={galleryOpen} translucent backgroundColor="transparent" />
+
+        <View style={styles.root}>
+          <View
+              style={styles.previewArea}
+              onLayout={event => {
+                const { width, height } = event.nativeEvent.layout;
+                setPreviewSize({ width, height });
+              }}
+              onTouchMove={onTouchMove}
+              onTouchEnd={() => {
+                lastPinchDist.current = null;
+              }}
+          >
+            <MainPreview
+                hybridRef={previewHybridRef}
+                orientation={mainDisplayOrientation}
+                aspectRatio={mainPreviewAspect}
+                frame={mainPreviewFrame}
+                bottomOffset={mainPreviewBottomOffset}
+                topOffset={previewTopOffset}
+                fillScreen={isFullPreview}
+                previewOutput={mainPreviewOutput}
+                sessionRevision={sessionRevision}
+                isTransitioning={
+                    isInitializing ||
+                    isSwitching ||
+                    isBusy ||
+                    pendingPhotoCapture ||
+                    pendingVideoStart ||
+                    !isAppActive
+                }
+            />
+
+            <Pressable style={styles.focusLayer} onPress={focusAtPoint} />
+            {focusPoint && <FocusBox point={focusPoint} />}
+            {previewIssue ? <PreviewStatusOverlay issue={previewIssue} mode="" /> : null}
+
+            <TopBar
+                aspectId={selectedAspectId}
+                aspectOptions={ASPECT_RATIOS}
+                captureMode={captureMode}
+                flashMode={flashMode}
+                isRecording={isRecording}
+                onAspectChange={setSelectedAspectId}
+                onCycleFlash={cycleFlash}
+                onOpenSettings={() => setSettingsOpen(true)}
+                onVideoFpsChange={setVideoFps}
+                onVideoQualityChange={setVideoQuality}
+                recordingSeconds={recordingSeconds}
+                videoFps={videoFps}
+                videoFpsOptions={videoFpsOptions}
+                videoQuality={videoQuality}
+            />
+
+            {viewMode === 'dual' && (
+                <PipPreview
+                    aspectRatio={subFrameSpec.aspect}
+                    isSwapped={isSwapped}
+                    orientation={subDisplayOrientation}
+                    onPress={swapMainAndSub}
+                    previewOutput={
+                      captureMode === 'photo'
+                          ? pendingPhotoCapture
+                              ? null
+                              : pipPreviewOutput
+                          : isRecording || pendingVideoStart
+                              ? null
+                              : pipPreviewOutput
+                    }
+                    sessionRevision={sessionRevision}
+                    placeholderMode={
+                      captureMode === 'photo' && pendingPhotoCapture
+                          ? 'photo'
+                          : captureMode === 'video' && (isRecording || pendingVideoStart)
+                              ? 'video'
+                              : null
+                    }
+                />
+            )}
+
+            {toast ? <Toast message={toast} /> : null}
+
+            <View style={styles.zoomBarContainer} pointerEvents="box-none">
+              <ZoomSelector
+                  currentZoom={zoom}
+                  onChange={setZoom}
+                  minZoom={device.minZoom}
+                  maxZoom={device.maxZoom}
+                  isRulerMode={isRulerMode}
+                  setIsRulerMode={setIsRulerMode}
+              />
+            </View>
+          </View>
+
+          <BottomControls
+              captureMode={captureMode}
+              isBusy={isBusy}
+              isRecording={isRecording}
+              lastMedia={lastMedia}
+              onCaptureModeChange={onCaptureModeChange}
+              onGalleryPress={openLastMedia}
+              onPrimaryAction={primaryAction}
+              onSwitchCamera={onSwitchCamera}
+              onViewModeChange={setViewMode}
+              viewMode={viewMode}
+          />
+        </View>
+
+        <SettingsModal
+            device={device}
+            devicesCount={devicesCount}
+            flashMode={flashMode}
+            onClose={() => setSettingsOpen(false)}
+            onFlashModeChange={setFlashMode}
+            open={settingsOpen}
+            photoFormat={photoFormat}
+            onPhotoFormatChange={setPhotoFormat}
+            photoQuality={photoQuality}
+            onPhotoQualityChange={setPhotoQuality}
+            saveDualOutputs={saveDualOutputs}
+            setSaveDualOutputs={setSaveDualOutputs}
+            videoFps={videoFps}
+            videoFpsOptions={videoFpsOptions}
+            onVideoFpsChange={setVideoFps}
+            videoCodec={videoCodec}
+            onVideoCodecChange={setVideoCodec}
+            videoQuality={videoQuality}
+            onVideoQualityChange={setVideoQuality}
+            viewMode={viewMode}
+        />
+
+        <GalleryModal
+            index={galleryIndex}
+            items={galleryItems}
+            onClose={closeGallery}
+            onDelete={handleGalleryDelete}
+            onIndexChange={setGalleryIndex}
+            open={galleryOpen}
+        />
+      </SafeAreaView>
+  );
+}
+
+export default CameraShell;
