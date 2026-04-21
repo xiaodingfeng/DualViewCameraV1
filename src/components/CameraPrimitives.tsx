@@ -38,13 +38,13 @@ import {
   pipFrameSize,
 } from '../utils/camera';
 
-export function PermissionScreen({ onRequest }: { onRequest: () => Promise<boolean> }) {
+export function PermissionScreen({ onRequest }: { onRequest: () => Promise<void> }) {
   return (
     <SafeAreaView style={styles.centerScreen}>
       <Text style={styles.title}>需要相机权限</Text>
-      <Text style={styles.description}>请授权相机权限，用于实时预览、拍照和录像。</Text>
+      <Text style={styles.description}>请点击下方按钮授权相机权限。若点击无反应，请在系统设置中手动开启。</Text>
       <Pressable style={styles.primaryButton} onPress={onRequest}>
-        <Text style={styles.primaryButtonText}>授权相机</Text>
+        <Text style={styles.primaryButtonText}>去授权</Text>
       </Pressable>
     </SafeAreaView>
   );
