@@ -26,7 +26,6 @@ export default function App(): React.JSX.Element {
   const [cameraPosition, setCameraPosition] = useState<CameraPosition>('back');
   const device = useCameraDevice(cameraPosition);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('photo');
-  const [isInitializing, setIsInitializing] = useState(true);
 
   // Simple handler to trigger system permission dialogs
   const handleRequestPermission = useCallback(async () => {
@@ -58,13 +57,6 @@ export default function App(): React.JSX.Element {
     }
   }, [captureMode, microphonePermission]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsInitializing(false);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, []);
-
   const switchCamera = useCallback(() => {
     setCameraPosition(current => (current === 'back' ? 'front' : 'back'));
   }, []);
@@ -87,7 +79,6 @@ export default function App(): React.JSX.Element {
       captureMode={captureMode}
       device={device}
       devicesCount={dCount}
-      isInitializing={isInitializing}
       microphoneReady={microphonePermission.hasPermission}
       onCaptureModeChange={setCaptureMode}
       onSwitchCamera={switchCamera}

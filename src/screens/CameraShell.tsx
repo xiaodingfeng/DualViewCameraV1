@@ -98,7 +98,6 @@ function CameraShell({
                        captureMode,
                        device,
                        devicesCount,
-                       isInitializing,
                        microphoneReady,
                        onCaptureModeChange,
                        onSwitchCamera,
@@ -107,7 +106,6 @@ function CameraShell({
   captureMode: CaptureMode;
   device: CameraDevice;
   devicesCount: number;
-  isInitializing: boolean;
   microphoneReady: boolean;
   onCaptureModeChange: (mode: CaptureMode) => void;
   onSwitchCamera: () => void;
@@ -185,6 +183,7 @@ function CameraShell({
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [isSwitching, setIsSwitching] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
   const panX = useRef(new Animated.Value(SCREEN_WIDTH)).current;
   const isGalleryOpenRef = useRef(false);
@@ -277,6 +276,7 @@ function CameraShell({
 
   useEffect(() => {
     setIsSwitching(true);
+    setIsCameraReady(false);
     const timer = setTimeout(() => setIsSwitching(false), 500);
     return () => clearTimeout(timer);
   }, [captureMode, viewMode]);
@@ -387,37 +387,26 @@ function CameraShell({
       [videoQualityConfig],
   );
 
-  const outputs = useMemo(() => {
-    if (captureMode === 'photo') {
-      if (viewMode === 'dual' && !pendingPhotoCapture) {
-        return [mainPreviewOutput, pipPreviewOutput];
-      }
-      return [mainPreviewOutput, photoOutput];
+  const photoOutputs = useMemo(() => {
+    if (viewMode === 'dual' && !pendingPhotoCapture) {
+      return [mainPreviewOutput, pipPreviewOutput];
     }
+    return [mainPreviewOutput, photoOutput];
+  }, [mainPreviewOutput, pipPreviewOutput, photoOutput, viewMode, pendingPhotoCapture]);
 
+  const videoOutputs = useMemo(() => {
     if (viewMode === 'dual' && !isRecording && !pendingVideoStart) {
       return [mainPreviewOutput, pipPreviewOutput];
     }
-
     return [mainPreviewOutput, videoOutput];
-  }, [
-    captureMode,
-    isRecording,
-    mainPreviewOutput,
-    pendingPhotoCapture,
-    pendingVideoStart,
-    pipPreviewOutput,
-    photoOutput,
-    videoOutput,
-    viewMode,
-  ]);
+  }, [isRecording, mainPreviewOutput, pendingVideoStart, pipPreviewOutput, videoOutput, viewMode]);
 
-  const cameraConstraints = useMemo(() => {
-    if (captureMode !== 'video') {
-      return [{ resolutionBias: photoOutput }];
-    }
-    return [{ fps: videoFps }, { resolutionBias: videoOutput }];
-  }, [captureMode, photoOutput, videoFps, videoOutput]);
+  const outputs = captureMode === 'video' ? videoOutputs : photoOutputs;
+
+  const photoConstraints = useMemo(() => [{ resolutionBias: photoOutput }], [photoOutput]);
+  const videoConstraints = useMemo(() => [{ fps: videoFps }, { resolutionBias: videoOutput }], [videoFps, videoOutput]);
+
+  const cameraConstraints = captureMode === 'video' ? videoConstraints : photoConstraints;
 
   const initialZoomRef = useRef(zoom);
 
@@ -435,6 +424,7 @@ function CameraShell({
     }
 
     setIsAppActive(false);
+    setIsCameraReady(false);
     cameraReopenTimerRef.current = setTimeout(() => {
       cameraReopenTimerRef.current = null;
       setSessionRevision(curr => curr + 1);
@@ -462,6 +452,7 @@ function CameraShell({
 
   const handleCameraStarted = useCallback(() => {
     setPreviewIssue('');
+    setIsCameraReady(true);
   }, []);
 
   const handleCameraError = useCallback(
@@ -497,16 +488,26 @@ function CameraShell({
   useEffect(() => {
     if (!device) return;
 
+    setIsCameraReady(false);
     setZoom(clamp(1, device.minZoom, device.maxZoom));
     setFlashMode('off');
     setIsSwapped(false);
     setIsRulerMode(false);
     setPreviewIssue('');
+  }, [device?.id, device]);
+
+  // Handle settings change validation without necessarily resetting isCameraReady
+  useEffect(() => {
+    if (!device) return;
 
     if (!safeSupportsFPS(device, videoFps)) {
       setVideoFps(30);
+    } else if (captureMode === 'video') {
+      // If we are in video mode and FPS changed, we might need to wait for onStarted again
+      // VisionCamera session will restart because videoConstraints identity changed
+      setIsCameraReady(false);
     }
-  }, [device?.id, device, videoFps]);
+  }, [device, videoFps, captureMode]);
 
   useEffect(() => {
     if (captureMode === 'video') {
@@ -558,6 +559,7 @@ function CameraShell({
         }
 
         setIsAppActive(false);
+        setIsCameraReady(false);
       }
     });
 
@@ -1004,12 +1006,11 @@ function CameraShell({
                 previewOutput={mainPreviewOutput}
                 sessionRevision={sessionRevision}
                 isTransitioning={
-                    isInitializing ||
+                    !isCameraReady ||
                     isSwitching ||
                     isBusy ||
                     pendingPhotoCapture ||
-                    pendingVideoStart ||
-                    !isAppActive
+                    pendingVideoStart
                 }
             />
 
