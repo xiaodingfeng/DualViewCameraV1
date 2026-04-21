@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   FlatList,
   Image,
   Linking,
-  Modal,
   Pressable,
   StatusBar,
   Text,
@@ -27,20 +27,20 @@ import {
 } from '../utils/camera';
 import { mimeTypeForMedia } from '../utils/gallery';
 
-export function GalleryModal({
+export function GalleryView({
   index,
   items,
   onClose,
   onDelete,
   onIndexChange,
-  open,
+  translateX,
 }: {
   index: number;
   items: GalleryMedia[];
   onClose: () => void;
   onDelete: (item: GalleryMedia) => void;
   onIndexChange: (index: number) => void;
-  open: boolean;
+  translateX: Animated.AnimatedInterpolation<number>;
 }) {
   const listRef = useRef<FlatList<GalleryMedia> | null>(null);
   const [viewerWidth, setViewerWidth] = useState(0);
@@ -50,19 +50,21 @@ export function GalleryModal({
   const current = items[index] ?? null;
 
   useEffect(() => {
-    if (!open || viewerWidth <= 0) return;
+    if (viewerWidth <= 0) return;
     requestAnimationFrame(() => {
       listRef.current?.scrollToIndex({ index, animated: false });
     });
-  }, [index, open, viewerWidth]);
+  }, [index, viewerWidth]);
 
   useEffect(() => {
-    if (!open) {
-      setDetailsOpen(false);
-      setFailedPreviewIds(new Set());
-      setZoomLocked(false);
+    setDetailsOpen(false);
+    setFailedPreviewIds(new Set());
+    setZoomLocked(false);
+    // Force scroll to index 0 (latest) when items change or component mounts
+    if (items.length > 0 && viewerWidth > 0) {
+      listRef.current?.scrollToIndex({ index: 0, animated: false });
     }
-  }, [open]);
+  }, [items.length, viewerWidth]);
 
   const shareCurrent = useCallback(async () => {
     if (current == null) return;
@@ -89,91 +91,91 @@ export function GalleryModal({
   }, [current, onDelete]);
 
   return (
-    <Modal animationType="fade" onRequestClose={onClose} statusBarTranslucent visible={open}>
-      <View style={styles.galleryRoot} onLayout={event => setViewerWidth(event.nativeEvent.layout.width)}>
-        <StatusBar hidden translucent backgroundColor="transparent" />
-        <View style={styles.galleryTopBar}>
-          <Text style={styles.galleryCount}>{items.length > 0 ? `${index + 1}/${items.length}` : '0/0'}</Text>
-        </View>
-
-        {viewerWidth > 0 && items.length > 0 ? (
-          <FlatList
-            ref={listRef}
-            data={items}
-            horizontal
-            initialNumToRender={3}
-            keyExtractor={item => item.id}
-            maxToRenderPerBatch={3}
-            pagingEnabled
-            removeClippedSubviews
-            scrollEnabled={!zoomLocked}
-            renderItem={({ item, index: itemIndex }) => (
-              <View style={[styles.galleryPage, { width: viewerWidth }]}>
-                {Math.abs(itemIndex - index) > 2 ? (
-                  <View style={styles.galleryLazyPage} />
-                ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
-                  <ZoomablePhoto
-                    item={item}
-                    onPreviewError={() =>
-                      setFailedPreviewIds(previous => {
-                        const next = new Set(previous);
-                        next.add(item.id);
-                        return next;
-                      })
-                    }
-                    onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined}
-                  />
-                ) : item.type === 'video' ? (
-                  <InlineVideoPlayer item={item} onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined} />
-                ) : (
-                  <MediaPreviewFallback item={item} />
-                )}
-              </View>
-            )}
-            showsHorizontalScrollIndicator={false}
-            windowSize={5}
-            getItemLayout={(_, itemIndex) => ({
-              length: viewerWidth,
-              offset: viewerWidth * itemIndex,
-              index: itemIndex,
-            })}
-            onMomentumScrollEnd={event => {
-              const nextIndex = Math.round(event.nativeEvent.contentOffset.x / viewerWidth);
-              onIndexChange(clamp(nextIndex, 0, items.length - 1));
-              setZoomLocked(false);
-            }}
-            onScrollToIndexFailed={info => {
-              setTimeout(() => {
-                listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
-              }, 50);
-            }}
-          />
-        ) : (
-          <View style={styles.galleryEmpty}>
-            <Text style={styles.galleryEmptyText}>还没有拍摄内容</Text>
-          </View>
-        )}
-
-        {detailsOpen && current ? <MediaDetails item={current} /> : null}
-
-        {current ? (
-          <View style={styles.galleryBottomBar}>
-            <Pressable style={styles.galleryBottomButton} onPress={() => setDetailsOpen(value => !value)}>
-              <Text style={styles.galleryBottomText}>详情</Text>
-            </Pressable>
-            <Pressable style={styles.galleryBottomButton} onPress={shareCurrent}>
-              <Text style={styles.galleryBottomText}>分享</Text>
-            </Pressable>
-            <Pressable style={styles.galleryBottomButton} onPress={openCurrent}>
-              <Text style={styles.galleryBottomText}>查看</Text>
-            </Pressable>
-            <Pressable style={[styles.galleryBottomButton, styles.galleryDeleteButton]} onPress={confirmDelete}>
-              <Text style={[styles.galleryBottomText, styles.galleryDeleteText]}>删除</Text>
-            </Pressable>
-          </View>
-        ) : null}
+    <Animated.View 
+      style={[styles.galleryRoot, { transform: [{ translateX }] }]} 
+      onLayout={event => setViewerWidth(event.nativeEvent.layout.width)}
+    >
+      <View style={styles.galleryTopBar}>
+        <Text style={styles.galleryCount}>{items.length > 0 ? `${index + 1}/${items.length}` : '0/0'}</Text>
       </View>
-    </Modal>
+
+      {viewerWidth > 0 && items.length > 0 ? (
+        <FlatList
+          ref={listRef}
+          data={items}
+          horizontal
+          initialNumToRender={3}
+          keyExtractor={item => item.id}
+          maxToRenderPerBatch={3}
+          pagingEnabled
+          removeClippedSubviews
+          scrollEnabled={!zoomLocked}
+          renderItem={({ item, index: itemIndex }) => (
+            <View style={[styles.galleryPage, { width: viewerWidth }]}>
+              {Math.abs(itemIndex - index) > 2 ? (
+                <View style={styles.galleryLazyPage} />
+              ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
+                <ZoomablePhoto
+                  item={item}
+                  onPreviewError={() =>
+                    setFailedPreviewIds(previous => {
+                      const next = new Set(previous);
+                      next.add(item.id);
+                      return next;
+                    })
+                  }
+                  onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined}
+                />
+              ) : item.type === 'video' ? (
+                <InlineVideoPlayer item={item} onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined} />
+              ) : (
+                <MediaPreviewFallback item={item} />
+              )}
+            </View>
+          )}
+          showsHorizontalScrollIndicator={false}
+          windowSize={5}
+          getItemLayout={(_, itemIndex) => ({
+            length: viewerWidth,
+            offset: viewerWidth * itemIndex,
+            index: itemIndex,
+          })}
+          onMomentumScrollEnd={event => {
+            const nextIndex = Math.round(event.nativeEvent.contentOffset.x / viewerWidth);
+            onIndexChange(clamp(nextIndex, 0, items.length - 1));
+            setZoomLocked(false);
+          }}
+          onScrollToIndexFailed={info => {
+            setTimeout(() => {
+              listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+            }, 50);
+          }}
+        />
+      ) : (
+        <View style={styles.galleryEmpty}>
+          <Text style={styles.galleryEmptyText}>还没有拍摄内容</Text>
+        </View>
+      )}
+
+      {detailsOpen && current ? <MediaDetails item={current} /> : null}
+
+      {current ? (
+        <View style={styles.galleryBottomBar}>
+          <Pressable style={styles.galleryBottomButton} onPress={() => setDetailsOpen(value => !value)}>
+            <Text style={styles.galleryBottomText}>详情</Text>
+          </Pressable>
+          <Pressable style={styles.galleryBottomButton} onPress={shareCurrent}>
+            <Text style={styles.galleryBottomText}>分享</Text>
+          </Pressable>
+          <Pressable style={styles.galleryBottomButton} onPress={openCurrent}>
+            <Text style={styles.galleryBottomText}>查看</Text>
+          </Pressable>
+          <Pressable style={[styles.galleryBottomButton, styles.galleryDeleteButton]} onPress={confirmDelete}>
+            <Text style={[styles.galleryBottomText, styles.galleryDeleteText]}>删除</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </Animated.View>
   );
 }
 

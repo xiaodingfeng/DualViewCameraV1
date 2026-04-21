@@ -3,6 +3,7 @@ import { Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } fr
 import type { CameraDevice } from 'react-native-vision-camera';
 
 import {
+  COLORS,
   PHOTO_FORMAT_CONFIG,
   PHOTO_QUALITY_CONFIG,
   VIDEO_CODEC_CONFIG,
@@ -68,10 +69,17 @@ function SettingsModal({
   const [tab, setTab] = useState<SettingsTab>('photo');
   const [legalDoc, setLegalDoc] = useState<LegalDocType>(null);
 
+  // Reset tab to photo whenever modal is opened
+  React.useEffect(() => {
+    if (open) {
+      setTab('photo');
+      setLegalDoc(null);
+    }
+  }, [open]);
+
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gestureState) => {
-      // 在二级页面打开时，不触发下滑关闭弹窗
       if (legalDoc) return false;
       return gestureState.dy > 15 && Math.abs(gestureState.dx) < 15;
     },
@@ -111,12 +119,12 @@ function SettingsModal({
       <View style={styles.modalShade}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View 
-          style={styles.settingsPanel} 
+          style={[styles.settingsPanel, { height: 600, maxHeight: 600 }]} 
           {...panResponder.panHandlers}
         >
           <View style={styles.settingsHeader}>
             <Text style={styles.settingsTitle}>设置</Text>
-            <Pressable onPress={onClose}><Text style={styles.closeText}>完成</Text></Pressable>
+            <Pressable onPress={onClose} style={{ padding: 4 }}><Text style={styles.closeText}>完成</Text></Pressable>
           </View>
           <View style={styles.settingsTabs}>
             <Pressable style={[styles.settingsTab, tab === 'photo' && styles.settingsTabActive]} onPress={() => setTab('photo')}>
@@ -129,7 +137,7 @@ function SettingsModal({
               <Text style={[styles.settingsTabText, tab === 'about' && styles.settingsTabTextActive]}>关于</Text>
             </Pressable>
           </View>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
             {tab === 'photo' ? (
               <>
                 <SettingsSection title="照片质量">
@@ -212,18 +220,17 @@ function SettingsModal({
             <View style={{ height: 40 }} />
           </ScrollView>
 
-          {/* 二级页面覆盖层 */}
+          {/* 二级页面覆盖层：重新设计 */}
           {legalDoc && currentLegal && (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#151515', borderRadius: 24, zIndex: 100 }]}>
-              <View style={styles.settingsHeader}>
-                <Pressable onPress={() => setLegalDoc(null)} style={{ paddingVertical: 4 }}>
-                   <Text style={styles.closeText}>‹ 返回</Text>
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#151515', borderRadius: 24, zIndex: 100, padding: 18 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20, marginTop: 4 }}>
+                <Pressable onPress={() => setLegalDoc(null)} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#222', alignItems: 'center', justifyContent: 'center' }}>
+                   <Text style={{ color: COLORS.accent, fontSize: 24, fontWeight: '300', marginTop: -4 }}>‹</Text>
                 </Pressable>
-                <Text style={styles.settingsTitle}>{currentLegal.title}</Text>
-                <View style={{ width: 40 }} />
+                <Text style={[styles.settingsTitle, { marginLeft: 12, flex: 1 }]}>{currentLegal.title}</Text>
               </View>
-              <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-                <Text style={styles.legalContentText}>{currentLegal.content}</Text>
+              <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+                <Text style={[styles.legalContentText, { fontSize: 14, color: '#aaa' }]}>{currentLegal.content}</Text>
               </ScrollView>
             </View>
           )}

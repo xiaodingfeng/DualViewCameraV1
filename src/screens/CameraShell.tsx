@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  Animated,
   AppState,
   BackHandler,
+  Dimensions,
   GestureResponderEvent,
+  PanResponder,
   Pressable,
   StatusBar,
   View,
@@ -38,8 +41,10 @@ import {
   TopBar,
   ZoomSelector,
 } from '../components/CameraPrimitives';
-import { GalleryModal } from '../components/GalleryModal';
+import { GalleryView } from '../components/GalleryModal';
 import { SettingsModal } from '../components/SettingsModal';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 import { styles } from '../styles/cameraStyles';
 import type {
   AspectRatioId,
@@ -180,6 +185,95 @@ function CameraShell({
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [isSwitching, setIsSwitching] = useState(false);
+
+  const panX = useRef(new Animated.Value(SCREEN_WIDTH)).current;
+  const isGalleryOpenRef = useRef(false);
+
+  const refreshGallery = useCallback(async () => {
+    const items = await loadDualViewGallery();
+    setGalleryItems(items);
+    setLastMedia(mediaToLastMedia(items[0] ?? null));
+    setGalleryIndex(current => (items.length === 0 ? 0 : Math.min(current, items.length - 1)));
+    return items;
+  }, []);
+
+  const openGallery = useCallback(() => {
+    isGalleryOpenRef.current = true;
+    setGalleryIndex(0); // Always show the latest media when opening
+    Animated.spring(panX, {
+      toValue: 0,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 12,
+    }).start();
+    setGalleryOpen(true);
+    refreshGallery().catch(() => {});
+  }, [panX, refreshGallery]);
+
+  const closeGallery = useCallback(() => {
+    isGalleryOpenRef.current = false;
+    Animated.spring(panX, {
+      toValue: SCREEN_WIDTH,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 12,
+    }).start();
+    setGalleryOpen(false);
+  }, [panX]);
+
+  const panResponder = useRef(
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+          // If gallery is open and we are at the first item, capture right swipes to allow closing
+          if (isGalleryOpenRef.current && galleryIndexRef.current === 0 && gestureState.dx > 40 && Math.abs(gestureState.dy) < 30) {
+            return true;
+          }
+          return false;
+        },
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          const { dx, dy } = gestureState;
+          if (isBusy || isRecording) return false;
+
+          if (isGalleryOpenRef.current) {
+            return dx > 30 && Math.abs(dy) < 40 && galleryIndexRef.current === 0;
+          }
+
+          return dx < -30 && Math.abs(dy) < 40;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          if (isGalleryOpenRef.current) {
+            if (gestureState.dx > 0) {
+              panX.setValue(gestureState.dx);
+            }
+          } else {
+            if (gestureState.dx < 0) {
+              const newX = SCREEN_WIDTH + gestureState.dx;
+              panX.setValue(Math.max(0, newX));
+            }
+          }
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (isGalleryOpenRef.current) {
+            if (gestureState.dx > SCREEN_WIDTH / 4 || gestureState.vx > 0.5) {
+              closeGallery();
+            } else {
+              openGallery();
+            }
+          } else {
+            if (gestureState.dx < -SCREEN_WIDTH / 4 || gestureState.vx < -0.5) {
+              openGallery();
+            } else {
+              closeGallery();
+            }
+          }
+        },
+      })
+  ).current;
+
+  const galleryIndexRef = useRef(0);
+  useEffect(() => {
+    galleryIndexRef.current = galleryIndex;
+  }, [galleryIndex]);
 
   useEffect(() => {
     setIsSwitching(true);
@@ -545,14 +639,6 @@ function CameraShell({
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const refreshGallery = useCallback(async () => {
-    const items = await loadDualViewGallery();
-    setGalleryItems(items);
-    setLastMedia(mediaToLastMedia(items[0] ?? null));
-    setGalleryIndex(current => (items.length === 0 ? 0 : Math.min(current, items.length - 1)));
-    return items;
-  }, []);
-
   useEffect(() => {
     refreshGallery().catch(() => {});
   }, [refreshGallery]);
@@ -565,11 +651,11 @@ function CameraShell({
   useEffect(() => {
     if (!galleryOpen) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      setGalleryOpen(false);
+      closeGallery();
       return true;
     });
     return () => subscription.remove();
-  }, [galleryOpen]);
+  }, [galleryOpen, closeGallery]);
 
   const saveToGallery = useCallback(
       async (filePath: string, type: 'photo' | 'video', label: string) => {
@@ -842,13 +928,8 @@ function CameraShell({
       return;
     }
     setGalleryIndex(0);
-    setGalleryOpen(true);
-    refreshGallery().catch(() => {});
-  }, [galleryItems.length, refreshGallery]);
-
-  const closeGallery = useCallback(() => {
-    setGalleryOpen(false);
-  }, []);
+    openGallery();
+  }, [galleryItems.length, openGallery]);
 
   const handleGalleryDelete = useCallback(
       async (item: GalleryMedia) => {
@@ -859,7 +940,7 @@ function CameraShell({
           setLastMedia(mediaToLastMedia(nextItems[0] ?? null));
 
           if (nextItems.length === 0) {
-            setGalleryOpen(false);
+            closeGallery();
             setGalleryIndex(0);
           } else {
             setGalleryIndex(current => Math.min(current, nextItems.length - 1));
@@ -871,7 +952,7 @@ function CameraShell({
           setToast(cameraErrorMessage(error, '删除失败'));
         }
       },
-      [galleryItems, refreshGallery],
+      [galleryItems, refreshGallery, closeGallery],
   );
 
   const lastPinchDist = useRef<number | null>(null);
@@ -900,7 +981,7 @@ function CameraShell({
       <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
         <StatusBar barStyle="light-content" hidden={galleryOpen} translucent backgroundColor="transparent" />
 
-        <View style={styles.root}>
+        <View style={styles.root} {...panResponder.panHandlers}>
           <View
               style={styles.previewArea}
               onLayout={event => {
@@ -1005,6 +1086,15 @@ function CameraShell({
               onViewModeChange={setViewMode}
               viewMode={viewMode}
           />
+
+          <GalleryView
+              index={galleryIndex}
+              items={galleryItems}
+              onClose={closeGallery}
+              onDelete={handleGalleryDelete}
+              onIndexChange={setGalleryIndex}
+              translateX={panX}
+          />
         </View>
 
         <SettingsModal
@@ -1028,15 +1118,6 @@ function CameraShell({
             videoQuality={videoQuality}
             onVideoQualityChange={setVideoQuality}
             viewMode={viewMode}
-        />
-
-        <GalleryModal
-            index={galleryIndex}
-            items={galleryItems}
-            onClose={closeGallery}
-            onDelete={handleGalleryDelete}
-            onIndexChange={setGalleryIndex}
-            open={galleryOpen}
         />
       </SafeAreaView>
   );
