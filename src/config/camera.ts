@@ -22,7 +22,7 @@ export const COLORS = {
 };
 
 export const TOP_BAR_OFFSET = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) + 12 : 50;
-export const PREVIEW_TOP_OFFSET = Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 0;
+export const PREVIEW_TOP_OFFSET = 0;
 export const LANDSCAPE_MAIN_BOTTOM_OFFSET = 148;
 export const ZOOM_BAR_WIDTH = 280;
 export const PX_PER_ZOOM = 120;

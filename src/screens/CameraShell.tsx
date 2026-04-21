@@ -25,9 +25,7 @@ import {
 
 import {
   ASPECT_RATIOS,
-  LANDSCAPE_MAIN_BOTTOM_OFFSET,
   PHOTO_QUALITY_CONFIG,
-  PREVIEW_TOP_OFFSET,
   VIDEO_QUALITY_CONFIG,
 } from '../config/camera';
 import {
@@ -272,18 +270,17 @@ function CameraShell({
       ((viewMode === 'single' && !isDeviceLandscape) || (viewMode === 'dual' && mainDisplayOrientation === 'portrait'));
 
   const mainPreviewAspect = mainFrameSpec.aspect;
-  const previewTopOffset = isFullPreview ? 0 : PREVIEW_TOP_OFFSET;
-  const mainPreviewBottomOffset =
-      !isFullPreview && mainDisplayOrientation === 'landscape' ? LANDSCAPE_MAIN_BOTTOM_OFFSET : 0;
+  const previewTopOffset = 0;
+  const mainPreviewBottomOffset = 0;
 
   const mainPreviewFrame = useMemo(
       () =>
           calculateContainedFrame(
               previewSize.width,
-              Math.max(0, previewSize.height - previewTopOffset - mainPreviewBottomOffset),
+              Math.max(0, previewSize.height),
               mainPreviewAspect,
           ),
-      [mainPreviewAspect, mainPreviewBottomOffset, previewSize.height, previewSize.width, previewTopOffset],
+      [mainPreviewAspect, previewSize.height, previewSize.width],
   );
 
   const videoFpsOptions = useMemo<VideoFps[]>(() => {
@@ -900,7 +897,7 @@ function CameraShell({
   const primaryAction = captureMode === 'photo' ? takePhoto : toggleRecording;
 
   return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
         <StatusBar barStyle="light-content" hidden={galleryOpen} translucent backgroundColor="transparent" />
 
         <View style={styles.root}>
