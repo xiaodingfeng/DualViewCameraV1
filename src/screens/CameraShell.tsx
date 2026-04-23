@@ -117,6 +117,8 @@ function CameraShell({
   const [photoFormat, setPhotoFormat] = useState<PhotoFormat>('jpeg');
   const [videoFps, setVideoFps] = useState<VideoFps>(30);
   const [videoQuality, setVideoQuality] = useState<VideoQuality>('4K');
+  const [appliedVideoFps, setAppliedVideoFps] = useState<VideoFps>(30);
+  const [appliedVideoQuality, setAppliedVideoQuality] = useState<VideoQuality>('4K');
   const [videoCodec, setVideoCodec] = useState<VideoCodecFormat>('h265');
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
@@ -127,7 +129,7 @@ function CameraShell({
       [selectedAspectId],
   );
   const photoQualityConfig = PHOTO_QUALITY_CONFIG[photoQuality];
-  const videoQualityConfig = VIDEO_QUALITY_CONFIG[videoQuality];
+  const appliedVideoQualityConfig = VIDEO_QUALITY_CONFIG[appliedVideoQuality];
 
   const mainPreviewOutput = usePreviewOutput();
   const pipPreviewOutput = usePreviewOutput();
@@ -144,7 +146,7 @@ function CameraShell({
   });
 
   const videoOutput = useVideoOutput({
-    targetResolution: videoQualityConfig.resolution,
+    targetResolution: appliedVideoQualityConfig.resolution,
     enableAudio: microphoneReady,
     enablePersistentRecorder: false,
   });
@@ -434,8 +436,8 @@ function CameraShell({
   }, [device]);
 
   const videoFrameSize = useCallback(
-      (spec: VisibleFrameSpec) => videoTargetSizeForAspect(spec.aspect, videoQualityConfig),
-      [videoQualityConfig],
+      (spec: VisibleFrameSpec) => videoTargetSizeForAspect(spec.aspect, appliedVideoQualityConfig),
+      [appliedVideoQualityConfig],
   );
 
   const photoOutputs = useMemo(() => {
@@ -455,7 +457,7 @@ function CameraShell({
   const outputs = captureMode === 'video' ? videoOutputs : photoOutputs;
 
   const photoConstraints = useMemo(() => [{ resolutionBias: photoOutput }], [photoOutput]);
-  const videoConstraints = useMemo(() => [{ fps: videoFps }, { resolutionBias: videoOutput }], [videoFps, videoOutput]);
+  const videoConstraints = useMemo(() => [{ fps: appliedVideoFps }, { resolutionBias: videoOutput }], [appliedVideoFps, videoOutput]);
 
   const cameraConstraints = captureMode === 'video' ? videoConstraints : photoConstraints;
 
@@ -547,18 +549,21 @@ function CameraShell({
     setPreviewIssue('');
   }, [device?.id, device]);
 
-  // Handle settings change validation without necessarily resetting isCameraReady
   useEffect(() => {
     if (!device) return;
 
     if (!safeSupportsFPS(device, videoFps)) {
       setVideoFps(30);
-    } else if (captureMode === 'video') {
-      // If we are in video mode and FPS changed, we might need to wait for onStarted again
-      // VisionCamera session will restart because videoConstraints identity changed
-      setIsCameraReady(false);
     }
-  }, [device, videoFps, captureMode]);
+  }, [device, videoFps]);
+
+  useEffect(() => {
+    if (!device) return;
+
+    if (!safeSupportsFPS(device, appliedVideoFps)) {
+      setAppliedVideoFps(30);
+    }
+  }, [appliedVideoFps, device]);
 
   useEffect(() => {
     if (captureMode === 'video') {
@@ -905,7 +910,19 @@ function CameraShell({
   const toggleRecording = useCallback(async () => {
     if (isBusy || captureMode !== 'video') return;
 
-    if (viewMode === 'dual' && !isRecording && !pendingVideoStart) {
+    const needsVideoPipelineWarmup =
+        !isRecording &&
+        !pendingVideoStart &&
+        (viewMode === 'dual' || appliedVideoFps !== videoFps || appliedVideoQuality !== videoQuality);
+
+    if (needsVideoPipelineWarmup) {
+      if (appliedVideoFps !== videoFps) {
+        setAppliedVideoFps(videoFps);
+      }
+      if (appliedVideoQuality !== videoQuality) {
+        setAppliedVideoQuality(videoQuality);
+      }
+      setIsCameraReady(false);
       setPendingVideoStart(true);
       return;
     }
@@ -951,7 +968,20 @@ function CameraShell({
       setIsBusy(false);
       setPendingVideoStart(false);
     }
-  }, [captureMode, captureOutputOrientation, finishRecording, isBusy, isRecording, pendingVideoStart, videoOutput, viewMode]);
+  }, [
+    appliedVideoFps,
+    appliedVideoQuality,
+    captureMode,
+    captureOutputOrientation,
+    finishRecording,
+    isBusy,
+    isRecording,
+    pendingVideoStart,
+    videoFps,
+    videoOutput,
+    videoQuality,
+    viewMode,
+  ]);
 
   useEffect(() => {
     if (!pendingVideoStart) return;
