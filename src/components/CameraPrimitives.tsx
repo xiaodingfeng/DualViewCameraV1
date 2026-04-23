@@ -346,6 +346,7 @@ export function ZoomSelector({
   maxZoom,
   isRulerMode,
   setIsRulerMode,
+  onGestureActiveChange,
 }: {
   currentZoom: number;
   onChange: (z: number) => void;
@@ -353,6 +354,7 @@ export function ZoomSelector({
   maxZoom: number;
   isRulerMode: boolean;
   setIsRulerMode: (m: boolean) => void;
+  onGestureActiveChange?: (active: boolean) => void;
 }) {
   const startZoomRef = useRef(currentZoom);
   const zoomRef = useRef(currentZoom);
@@ -381,6 +383,7 @@ export function ZoomSelector({
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
         startZoomRef.current = zoomRef.current;
+        onGestureActiveChange?.(true);
         clearTimer();
       },
       onPanResponderMove: (_, gesture) => {
@@ -393,8 +396,12 @@ export function ZoomSelector({
       },
       onPanResponderRelease: () => {
         if (isRulerMode) startTimer();
+        onGestureActiveChange?.(false);
       },
-      onPanResponderTerminate: () => setIsRulerMode(false),
+      onPanResponderTerminate: () => {
+        setIsRulerMode(false);
+        onGestureActiveChange?.(false);
+      },
     }),
   ).current;
 

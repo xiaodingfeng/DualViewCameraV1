@@ -187,6 +187,17 @@ function CameraShell({
 
   const panX = useRef(new Animated.Value(SCREEN_WIDTH)).current;
   const isGalleryOpenRef = useRef(false);
+  const isBusyRef = useRef(isBusy);
+  const isRecordingRef = useRef(isRecording);
+  const isZoomGestureActiveRef = useRef(false);
+
+  useEffect(() => {
+    isBusyRef.current = isBusy;
+  }, [isBusy]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   const refreshGallery = useCallback(async () => {
     const items = await loadDualViewGallery();
@@ -223,6 +234,7 @@ function CameraShell({
   const panResponder = useRef(
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+          if (isZoomGestureActiveRef.current) return false;
           // If gallery is open and we are at the first item, capture right swipes to allow closing
           if (isGalleryOpenRef.current && galleryIndexRef.current === 0 && gestureState.dx > 40 && Math.abs(gestureState.dy) < 30) {
             return true;
@@ -231,7 +243,7 @@ function CameraShell({
         },
         onMoveShouldSetPanResponder: (_, gestureState) => {
           const { dx, dy } = gestureState;
-          if (isBusy || isRecording) return false;
+          if (isBusyRef.current || isRecordingRef.current || isZoomGestureActiveRef.current) return false;
 
           if (isGalleryOpenRef.current) {
             return dx > 30 && Math.abs(dy) < 40 && galleryIndexRef.current === 0;
@@ -1071,6 +1083,9 @@ function CameraShell({
                   maxZoom={device.maxZoom}
                   isRulerMode={isRulerMode}
                   setIsRulerMode={setIsRulerMode}
+                  onGestureActiveChange={active => {
+                    isZoomGestureActiveRef.current = active;
+                  }}
               />
             </View>
           </View>

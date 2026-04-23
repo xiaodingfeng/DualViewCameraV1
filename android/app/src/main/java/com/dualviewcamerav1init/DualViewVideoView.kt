@@ -176,11 +176,10 @@ class DualViewVideoView(private val reactContext: ThemedReactContext) : FrameLay
       player.setSurface(outputSurface)
       player.isLooping = false
       player.setOnPreparedListener { prepared ->
-        prepared.start()
-        updatePlayIcon(true)
+        prepared.seekTo(0)
+        updatePlayIcon(false)
         updateProgress()
         uiHandler.removeCallbacks(progressTick)
-        uiHandler.post(progressTick)
       }
       player.setOnVideoSizeChangedListener { _, nextVideoWidth, nextVideoHeight ->
         videoWidth = nextVideoWidth
