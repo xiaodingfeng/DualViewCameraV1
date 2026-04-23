@@ -197,11 +197,11 @@ export function BottomControls({
   return (
     <View style={styles.bottomControls} pointerEvents="box-none">
       <View style={styles.modeRow}>
-        <Text onPress={() => onCaptureModeChange('photo')} style={[styles.modeText, captureMode === 'photo' && styles.modeTextActive]}>拍照</Text>
-        <Text onPress={() => onCaptureModeChange('video')} style={[styles.modeText, captureMode === 'video' && styles.modeTextActive]}>录像</Text>
+        <Text onPress={() => !isRecording && onCaptureModeChange('photo')} style={[styles.modeText, captureMode === 'photo' && styles.modeTextActive, isRecording && styles.modeTextDisabled]}>拍照</Text>
+        <Text onPress={() => !isRecording && onCaptureModeChange('video')} style={[styles.modeText, captureMode === 'video' && styles.modeTextActive, isRecording && styles.modeTextDisabled]}>录像</Text>
       </View>
       <View style={styles.actionRow}>
-        <Pressable style={styles.thumbnailButton} onPress={onGalleryPress}>
+        <Pressable style={styles.thumbnailButton} onPress={onGalleryPress} disabled={isRecording}>
           {lastMedia?.type === 'photo' ? (
             <Image source={{ uri: lastMedia.uri }} style={styles.thumbnailImage} />
           ) : (
@@ -215,16 +215,16 @@ export function BottomControls({
         >
           <View style={[styles.shutterInner, isRecording && styles.shutterInnerRecording]} />
         </Pressable>
-        <RoundButton label="" onPress={onSwitchCamera} style={styles.noBorderButton}>
+        <RoundButton label="" onPress={onSwitchCamera} style={styles.noBorderButton} active={false} disabled={isRecording}>
           <SwitchCameraIcon width={32} height={32} />
         </RoundButton>
       </View>
       <View style={styles.viewModeRow}>
-        <Pressable style={styles.viewModeButton} onPress={() => onViewModeChange('single')}>
-          <Text style={[styles.viewModeText, viewMode === 'single' && styles.viewModeTextActive]}>单画面</Text>
+        <Pressable style={styles.viewModeButton} onPress={() => !isRecording && onViewModeChange('single')} disabled={isRecording}>
+          <Text style={[styles.viewModeText, viewMode === 'single' && styles.viewModeTextActive, isRecording && styles.viewModeTextDisabled]}>单画面</Text>
         </Pressable>
-        <Pressable style={styles.viewModeButton} onPress={() => onViewModeChange('dual')}>
-          <Text style={[styles.viewModeText, viewMode === 'dual' && styles.viewModeTextActive]}>双画面</Text>
+        <Pressable style={styles.viewModeButton} onPress={() => !isRecording && onViewModeChange('dual')} disabled={isRecording}>
+          <Text style={[styles.viewModeText, viewMode === 'dual' && styles.viewModeTextActive, isRecording && styles.viewModeTextDisabled]}>双画面</Text>
         </Pressable>
       </View>
     </View>
@@ -470,21 +470,28 @@ export function Toast({ message }: { message: string }) {
 }
 
 export function RoundButton({
-  active = false,
+  active,
   label,
   onPress,
   style,
   children,
+  disabled,
 }: {
   active?: boolean;
   label: string;
   onPress: () => void;
   style?: any;
   children?: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
-    <Pressable style={[styles.roundButton, active && styles.roundButtonActive, style]} onPress={onPress}>
+    <Pressable
+      style={[styles.roundButton, active && styles.roundButtonActive, style, disabled && { opacity: 0.3 }]}
+      onPress={onPress}
+      disabled={disabled}
+    >
       {children ? children : <Text style={styles.roundButtonText}>{label}</Text>}
     </Pressable>
   );
 }
+

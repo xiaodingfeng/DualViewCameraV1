@@ -187,6 +187,19 @@ function CameraShell({
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isVideoSessionTarget, setIsVideoSessionTarget] = useState(false);
+
+  const isVideoSessionRequired = isRecording || pendingVideoStart;
+  useEffect(() => {
+    if (isVideoSessionRequired) {
+      setIsVideoSessionTarget(true);
+    } else {
+      // Delay switching back from video-pipe to dual-preview pipe by 400ms
+      // to move the hardware flicker away from the "Stop" button press.
+      const timer = setTimeout(() => setIsVideoSessionTarget(false), 400);
+      return () => clearTimeout(timer);
+    }
+  }, [isVideoSessionRequired]);
 
   const panX = useRef(new Animated.Value(SCREEN_WIDTH)).current;
   const isGalleryOpenRef = useRef(false);
@@ -289,12 +302,36 @@ function CameraShell({
     galleryIndexRef.current = galleryIndex;
   }, [galleryIndex]);
 
+  const lastViewMode = useRef(viewMode);
+  const lastCaptureMode = useRef(captureMode);
+
   useEffect(() => {
+    const isViewModeChange = viewMode !== lastViewMode.current;
+    const isCaptureModeChange = captureMode !== lastCaptureMode.current;
+    lastViewMode.current = viewMode;
+    lastCaptureMode.current = captureMode;
+
+    // Session only reconfigures when switching viewMode
+    const needsDelay = viewMode === 'dual';
     setIsSwitching(true);
-    setIsCameraReady(false);
-    const timer = setTimeout(() => setIsSwitching(false), 500);
+
+    // If we change viewMode or we are in the sensitive dual mode,
+    // reset ready state to show loading instead of a frozen frame during reconfiguration.
+    // Also force a hard reset (sessionRevision bump) if changing modes in dual-view to purge buffers.
+    if (isViewModeChange || (isCaptureModeChange && viewMode === 'dual')) {
+      setIsCameraReady(false);
+      setSessionRevision(curr => curr + 1);
+    }
+
+    // If we are switching to video mode, pre-warm the video settings to avoid re-binding during record start
+    if (captureMode === 'video') {
+      if (appliedVideoFps !== videoFps) setAppliedVideoFps(videoFps);
+      if (appliedVideoQuality !== videoQuality) setAppliedVideoQuality(videoQuality);
+    }
+
+    const timer = setTimeout(() => setIsSwitching(false), needsDelay ? 600 : 50);
     return () => clearTimeout(timer);
-  }, [captureMode, viewMode]);
+  }, [captureMode, viewMode, videoFps, videoQuality, appliedVideoFps, appliedVideoQuality]);
 
   useEffect(() => {
     let cancelled = false;
@@ -440,26 +477,38 @@ function CameraShell({
       [appliedVideoQualityConfig],
   );
 
-  const photoOutputs = useMemo(() => {
-    if (viewMode === 'dual' && !pendingPhotoCapture) {
-      return [mainPreviewOutput, pipPreviewOutput];
+  const photoOutputs = useMemo(() => [mainPreviewOutput, photoOutput], [mainPreviewOutput, photoOutput]);
+  const videoOutputs = useMemo(() => [mainPreviewOutput, videoOutput], [mainPreviewOutput, videoOutput]);
+
+  const outputs = useMemo(() => {
+    if (viewMode === 'dual') {
+      // 1. If actively recording or in the buffer period after stop, 
+      // use the most stable single-preview + video pipe.
+      if (isVideoSessionTarget) {
+        return [mainPreviewOutput, videoOutput];
+      }
+      
+      // 2. Dual-View Standby (Both Photo and Video modes).
+      // Strategy: Use [Preview+Preview+Photo] which is confirmed stable.
+      return [mainPreviewOutput, pipPreviewOutput, photoOutput];
     }
-    return [mainPreviewOutput, photoOutput];
-  }, [mainPreviewOutput, pipPreviewOutput, photoOutput, viewMode, pendingPhotoCapture]);
 
-  const videoOutputs = useMemo(() => {
-    if (viewMode === 'dual' && !isRecording && !pendingVideoStart) {
-      return [mainPreviewOutput, pipPreviewOutput];
+    // Single mode: All-in-one pipeline is standard and stable.
+    return [mainPreviewOutput, photoOutput, videoOutput];
+  }, [viewMode, isVideoSessionTarget, mainPreviewOutput, pipPreviewOutput, photoOutput, videoOutput]);
+
+  const cameraConstraints = useMemo(() => {
+    // For Dual-View Standby, use standard 30fps without resolution bias 
+    // to ensure the hardware can reliably handle multiple streams.
+    if (viewMode === 'dual' && !isVideoSessionTarget) {
+       return [{ fps: 30 }]; 
     }
-    return [mainPreviewOutput, videoOutput];
-  }, [isRecording, mainPreviewOutput, pendingVideoStart, pipPreviewOutput, videoOutput, viewMode]);
 
-  const outputs = captureMode === 'video' ? videoOutputs : photoOutputs;
-
-  const photoConstraints = useMemo(() => [{ resolutionBias: photoOutput }], [photoOutput]);
-  const videoConstraints = useMemo(() => [{ fps: appliedVideoFps }, { resolutionBias: videoOutput }], [appliedVideoFps, videoOutput]);
-
-  const cameraConstraints = captureMode === 'video' ? videoConstraints : photoConstraints;
+    if (captureMode === 'video') {
+      return [{ fps: appliedVideoFps }, { resolutionBias: videoOutput }];
+    }
+    return [{ resolutionBias: photoOutput }];
+  }, [viewMode, captureMode, isVideoSessionTarget, appliedVideoFps, videoOutput, photoOutput]);
 
   const initialZoomRef = useRef(zoom);
 
@@ -868,7 +917,7 @@ function CameraShell({
     if (!pendingPhotoCapture) return;
     const timer = setTimeout(() => {
       takePhoto();
-    }, 200);
+    }, 32);
     return () => clearTimeout(timer);
   }, [pendingPhotoCapture, takePhoto]);
 
@@ -910,6 +959,8 @@ function CameraShell({
   const toggleRecording = useCallback(async () => {
     if (isBusy || captureMode !== 'video') return;
 
+    // In dual-view, we MUST warmup because standby pipeline is [Main+Pip+Photo],
+    // while recording pipeline is [Main+Video].
     const needsVideoPipelineWarmup =
         !isRecording &&
         !pendingVideoStart &&
@@ -987,7 +1038,7 @@ function CameraShell({
     if (!pendingVideoStart) return;
     const timer = setTimeout(() => {
       toggleRecording();
-    }, 200);
+    }, 32);
     return () => clearTimeout(timer);
   }, [pendingVideoStart, toggleRecording]);
 
@@ -1029,6 +1080,7 @@ function CameraShell({
   }, [captureMode, device?.hasFlash, device?.hasTorch]);
 
   const swapMainAndSub = useCallback(() => {
+    if (isRecordingRef.current) return;
     setIsSwapped(current => !current);
   }, []);
 
@@ -1115,10 +1167,7 @@ function CameraShell({
                 sessionRevision={sessionRevision}
                 isTransitioning={
                     !isCameraReady ||
-                    isSwitching ||
-                    isBusy ||
-                    pendingPhotoCapture ||
-                    pendingVideoStart
+                    isSwitching
                 }
             />
 
@@ -1154,7 +1203,7 @@ function CameraShell({
                           ? pendingPhotoCapture
                               ? null
                               : pipPreviewOutput
-                          : isRecording || pendingVideoStart
+                          : isVideoSessionTarget
                               ? null
                               : pipPreviewOutput
                     }
@@ -1162,7 +1211,7 @@ function CameraShell({
                     placeholderMode={
                       captureMode === 'photo' && pendingPhotoCapture
                           ? 'photo'
-                          : captureMode === 'video' && (isRecording || pendingVideoStart)
+                          : captureMode === 'video' && isVideoSessionTarget
                               ? 'video'
                               : null
                     }
