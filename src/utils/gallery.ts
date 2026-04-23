@@ -131,7 +131,32 @@ export async function createPhotoVariantForAspect(
   suffix: string,
   format: PhotoFormat = 'jpeg',
   quality = 94,
+  mirror = false,
+  rotateLandscapeFallback = false,
 ): Promise<string> {
+  if (DualViewMedia?.createPhotoVariantWithAspectFormatQualityMirrorAndRotate) {
+    return DualViewMedia.createPhotoVariantWithAspectFormatQualityMirrorAndRotate(
+      toLocalPath(filePath),
+      slugify(`${suffix}_${spec.variant}`),
+      Math.round(spec.aspect * 10000),
+      10000,
+      format,
+      quality,
+      mirror,
+      rotateLandscapeFallback,
+    );
+  }
+  if (DualViewMedia?.createPhotoVariantWithAspectFormatQualityAndMirror) {
+    return DualViewMedia.createPhotoVariantWithAspectFormatQualityAndMirror(
+      toLocalPath(filePath),
+      slugify(`${suffix}_${spec.variant}`),
+      Math.round(spec.aspect * 10000),
+      10000,
+      format,
+      quality,
+      mirror,
+    );
+  }
   if (DualViewMedia?.createPhotoVariantWithAspectFormatQuality) {
     return DualViewMedia.createPhotoVariantWithAspectFormatQuality(
       toLocalPath(filePath),
@@ -168,7 +193,39 @@ export async function createDualPhotoVariantsForAspects(
   subSpec: VisibleFrameSpec,
   format: PhotoFormat = 'jpeg',
   quality = 94,
+  mirror = false,
+  rotateLandscapeFallback: { main: boolean; sub: boolean } = { main: false, sub: false },
 ): Promise<{ mainPath: string; subPath: string }> {
+  if (DualViewMedia?.createDualPhotoVariantsWithAspectsFormatQualityMirrorAndRotate) {
+    return DualViewMedia.createDualPhotoVariantsWithAspectsFormatQualityMirrorAndRotate(
+      toLocalPath(filePath),
+      slugify(`main_${mainSpec.variant}`),
+      Math.round(mainSpec.aspect * 10000),
+      10000,
+      slugify(`sub_${subSpec.variant}`),
+      Math.round(subSpec.aspect * 10000),
+      10000,
+      format,
+      quality,
+      mirror,
+      rotateLandscapeFallback.main,
+      rotateLandscapeFallback.sub,
+    );
+  }
+  if (DualViewMedia?.createDualPhotoVariantsWithAspectsFormatQualityAndMirror) {
+    return DualViewMedia.createDualPhotoVariantsWithAspectsFormatQualityAndMirror(
+      toLocalPath(filePath),
+      slugify(`main_${mainSpec.variant}`),
+      Math.round(mainSpec.aspect * 10000),
+      10000,
+      slugify(`sub_${subSpec.variant}`),
+      Math.round(subSpec.aspect * 10000),
+      10000,
+      format,
+      quality,
+      mirror,
+    );
+  }
   if (DualViewMedia?.createDualPhotoVariantsWithAspectsFormatQuality) {
     return DualViewMedia.createDualPhotoVariantsWithAspectsFormatQuality(
       toLocalPath(filePath),
@@ -206,8 +263,8 @@ export async function createDualPhotoVariantsForAspects(
     );
   }
   const [mainPath, subPath] = await Promise.all([
-    createPhotoVariantForAspect(filePath, mainSpec, 'main'),
-    createPhotoVariantForAspect(filePath, subSpec, 'sub'),
+    createPhotoVariantForAspect(filePath, mainSpec, 'main', format, quality, mirror, rotateLandscapeFallback.main),
+    createPhotoVariantForAspect(filePath, subSpec, 'sub', format, quality, mirror, rotateLandscapeFallback.sub),
   ]);
   return { mainPath, subPath };
 }
@@ -218,7 +275,32 @@ export async function createVideoVariant(
   suffix: string,
   targetSize: { width: number; height: number },
   codec: VideoCodecFormat = 'h265',
+  mirror = false,
+  rotateLandscapeFallback = false,
 ): Promise<string> {
+  if (DualViewMedia?.createVideoVariantWithMirrorAndRotate) {
+    return DualViewMedia.createVideoVariantWithMirrorAndRotate(
+      toLocalPath(filePath),
+      variant,
+      slugify(suffix),
+      targetSize.width,
+      targetSize.height,
+      codec,
+      mirror,
+      rotateLandscapeFallback,
+    );
+  }
+  if (DualViewMedia?.createVideoVariantWithMirror) {
+    return DualViewMedia.createVideoVariantWithMirror(
+      toLocalPath(filePath),
+      variant,
+      slugify(suffix),
+      targetSize.width,
+      targetSize.height,
+      codec,
+      mirror,
+    );
+  }
   if (!DualViewMedia?.createVideoVariant) return toLocalPath(filePath);
   return DualViewMedia.createVideoVariant(
     toLocalPath(filePath),

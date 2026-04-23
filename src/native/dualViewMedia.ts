@@ -26,6 +26,25 @@ export const { DualViewMedia } = NativeModules as {
       format: PhotoFormat,
       quality: number,
     ): Promise<string>;
+    createPhotoVariantWithAspectFormatQualityAndMirror?(
+      sourcePath: string,
+      suffix: string,
+      aspectWidth: number,
+      aspectHeight: number,
+      format: PhotoFormat,
+      quality: number,
+      mirror: boolean,
+    ): Promise<string>;
+    createPhotoVariantWithAspectFormatQualityMirrorAndRotate?(
+      sourcePath: string,
+      suffix: string,
+      aspectWidth: number,
+      aspectHeight: number,
+      format: PhotoFormat,
+      quality: number,
+      mirror: boolean,
+      rotateLandscapeFallback: boolean,
+    ): Promise<string>;
     getMediaStoragePath?(uri: string): Promise<string>;
     createDualPhotoVariantsWithAspects?(
       sourcePath: string,
@@ -57,6 +76,32 @@ export const { DualViewMedia } = NativeModules as {
       format: PhotoFormat,
       quality: number,
     ): Promise<{ mainPath: string; subPath: string }>;
+    createDualPhotoVariantsWithAspectsFormatQualityAndMirror?(
+      sourcePath: string,
+      mainSuffix: string,
+      mainAspectWidth: number,
+      mainAspectHeight: number,
+      subSuffix: string,
+      subAspectWidth: number,
+      subAspectHeight: number,
+      format: PhotoFormat,
+      quality: number,
+      mirror: boolean,
+    ): Promise<{ mainPath: string; subPath: string }>;
+    createDualPhotoVariantsWithAspectsFormatQualityMirrorAndRotate?(
+      sourcePath: string,
+      mainSuffix: string,
+      mainAspectWidth: number,
+      mainAspectHeight: number,
+      subSuffix: string,
+      subAspectWidth: number,
+      subAspectHeight: number,
+      format: PhotoFormat,
+      quality: number,
+      mirror: boolean,
+      mainRotateLandscapeFallback: boolean,
+      subRotateLandscapeFallback: boolean,
+    ): Promise<{ mainPath: string; subPath: string }>;
     createVideoVariant?(
       sourcePath: string,
       variant: PhotoVariant,
@@ -64,6 +109,25 @@ export const { DualViewMedia } = NativeModules as {
       width: number,
       height: number,
       codec: VideoCodecFormat,
+    ): Promise<string>;
+    createVideoVariantWithMirror?(
+      sourcePath: string,
+      variant: PhotoVariant,
+      suffix: string,
+      width: number,
+      height: number,
+      codec: VideoCodecFormat,
+      mirror: boolean,
+    ): Promise<string>;
+    createVideoVariantWithMirrorAndRotate?(
+      sourcePath: string,
+      variant: PhotoVariant,
+      suffix: string,
+      width: number,
+      height: number,
+      codec: VideoCodecFormat,
+      mirror: boolean,
+      rotateLandscapeFallback: boolean,
     ): Promise<string>;
     shareMedia?(uri: string, mimeType: string, title: string): Promise<boolean>;
   };

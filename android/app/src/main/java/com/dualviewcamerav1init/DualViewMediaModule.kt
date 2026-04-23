@@ -126,9 +126,19 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun createPhotoVariantWithAspectFormatQuality(sourcePath: String, suffix: String, aspectWidth: Double, aspectHeight: Double, format: String, quality: Double, promise: Promise) {
+    createPhotoVariantWithAspectFormatQualityAndMirror(sourcePath, suffix, aspectWidth, aspectHeight, format, quality, false, promise)
+  }
+
+  @ReactMethod
+  fun createPhotoVariantWithAspectFormatQualityAndMirror(sourcePath: String, suffix: String, aspectWidth: Double, aspectHeight: Double, format: String, quality: Double, mirror: Boolean, promise: Promise) {
+    createPhotoVariantWithAspectFormatQualityMirrorAndRotate(sourcePath, suffix, aspectWidth, aspectHeight, format, quality, mirror, false, promise)
+  }
+
+  @ReactMethod
+  fun createPhotoVariantWithAspectFormatQualityMirrorAndRotate(sourcePath: String, suffix: String, aspectWidth: Double, aspectHeight: Double, format: String, quality: Double, mirror: Boolean, rotateLandscapeFallback: Boolean, promise: Promise) {
     val width = aspectWidth.coerceAtLeast(1.0)
     val height = aspectHeight.coerceAtLeast(1.0)
-    createPhotoVariantInternal(sourcePath, width / height, "wysiwyg", suffix, format, safeQuality(quality), promise)
+    createPhotoVariantInternal(sourcePath, width / height, "wysiwyg", suffix, format, safeQuality(quality), promise, mirror, rotateLandscapeFallback)
   }
 
   @ReactMethod
@@ -194,6 +204,68 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       quality: Double,
       promise: Promise
   ) {
+    createDualPhotoVariantsWithAspectsFormatQualityAndMirror(
+        sourcePath,
+        mainSuffix,
+        mainAspectWidth,
+        mainAspectHeight,
+        subSuffix,
+        subAspectWidth,
+        subAspectHeight,
+        format,
+        quality,
+        false,
+        promise
+    )
+  }
+
+  @ReactMethod
+  fun createDualPhotoVariantsWithAspectsFormatQualityAndMirror(
+      sourcePath: String,
+      mainSuffix: String,
+      mainAspectWidth: Double,
+      mainAspectHeight: Double,
+      subSuffix: String,
+      subAspectWidth: Double,
+      subAspectHeight: Double,
+      format: String,
+      quality: Double,
+      mirror: Boolean,
+      promise: Promise
+  ) {
+    createDualPhotoVariantsWithAspectsFormatQualityMirrorAndRotate(
+        sourcePath,
+        mainSuffix,
+        mainAspectWidth,
+        mainAspectHeight,
+        subSuffix,
+        subAspectWidth,
+        subAspectHeight,
+        format,
+        quality,
+        mirror,
+        false,
+        false,
+        promise
+    )
+  }
+
+  @ReactMethod
+  fun createDualPhotoVariantsWithAspectsFormatQualityMirrorAndRotate(
+      sourcePath: String,
+      mainSuffix: String,
+      mainAspectWidth: Double,
+      mainAspectHeight: Double,
+      subSuffix: String,
+      subAspectWidth: Double,
+      subAspectHeight: Double,
+      format: String,
+      quality: Double,
+      mirror: Boolean,
+      mainRotateLandscapeFallback: Boolean,
+      subRotateLandscapeFallback: Boolean,
+      promise: Promise
+  ) {
     try {
       val source = File(sourcePath.removePrefix("file://"))
       if (!source.exists()) {
@@ -214,7 +286,9 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
           "main",
           mainSuffix,
           format,
-          safeQuality(quality)
+          safeQuality(quality),
+          mirror,
+          mainRotateLandscapeFallback
       )
       val subTarget = writePhotoVariant(
           upright,
@@ -222,7 +296,9 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
           "sub",
           subSuffix,
           format,
-          safeQuality(quality)
+          safeQuality(quality),
+          mirror,
+          subRotateLandscapeFallback
       )
 
       if (decoded !== upright) decoded.recycle()
@@ -237,7 +313,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
-  private fun createPhotoVariantInternal(sourcePath: String, targetAspect: Double, variantLabel: String, suffix: String, format: String, quality: Int = 94, promise: Promise) {
+  private fun createPhotoVariantInternal(sourcePath: String, targetAspect: Double, variantLabel: String, suffix: String, format: String, quality: Int = 94, promise: Promise, mirror: Boolean = false, rotateLandscapeFallback: Boolean = false) {
     try {
       val source = File(sourcePath.removePrefix("file://"))
       if (!source.exists()) {
@@ -252,7 +328,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       }
 
       val upright = applyExifOrientation(decoded, source.absolutePath)
-      val target = writePhotoVariant(upright, targetAspect, variantLabel, suffix, format, quality)
+      val target = writePhotoVariant(upright, targetAspect, variantLabel, suffix, format, quality, mirror, rotateLandscapeFallback)
 
       if (decoded !== upright) decoded.recycle()
       upright.recycle()
@@ -263,26 +339,40 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
-  private fun writePhotoVariant(source: Bitmap, targetAspect: Double, variantLabel: String, suffix: String, format: String, quality: Int = 94): File {
-    val cropped = centerCrop(source, targetAspect)
+  private fun writePhotoVariant(source: Bitmap, targetAspect: Double, variantLabel: String, suffix: String, format: String, quality: Int = 94, mirror: Boolean = false, rotateLandscapeFallback: Boolean = false): File {
+    val oriented = orientBitmapForTargetAspect(source, targetAspect, rotateLandscapeFallback)
+    val cropped = centerCrop(oriented, targetAspect)
+    val outputBitmap = if (mirror) mirrorBitmap(cropped) else cropped
     val useHeif = shouldWriteHeif(format)
     val target = File(
         reactContext.cacheDir,
         "DualViewCamera_${safeSuffix(suffix)}_${variantLabel}_${System.currentTimeMillis()}.${if (useHeif) "heic" else "jpg"}"
     )
     if (useHeif) {
-      writeHeif(cropped, target, quality)
+      writeHeif(outputBitmap, target, quality)
     } else {
       FileOutputStream(target).use { output ->
-        cropped.compress(Bitmap.CompressFormat.JPEG, quality, output)
+        outputBitmap.compress(Bitmap.CompressFormat.JPEG, quality, output)
       }
     }
-    if (source !== cropped) cropped.recycle()
+    if (outputBitmap !== cropped) outputBitmap.recycle()
+    if (oriented !== cropped) cropped.recycle()
+    if (oriented !== source && oriented !== cropped) oriented.recycle()
     return target
   }
 
   @ReactMethod
   fun createVideoVariant(sourcePath: String, variant: String, suffix: String, targetWidth: Double, targetHeight: Double, codec: String, promise: Promise) {
+    createVideoVariantWithMirror(sourcePath, variant, suffix, targetWidth, targetHeight, codec, false, promise)
+  }
+
+  @ReactMethod
+  fun createVideoVariantWithMirror(sourcePath: String, variant: String, suffix: String, targetWidth: Double, targetHeight: Double, codec: String, mirror: Boolean, promise: Promise) {
+    createVideoVariantWithMirrorAndRotate(sourcePath, variant, suffix, targetWidth, targetHeight, codec, mirror, false, promise)
+  }
+
+  @ReactMethod
+  fun createVideoVariantWithMirrorAndRotate(sourcePath: String, variant: String, suffix: String, targetWidth: Double, targetHeight: Double, codec: String, mirror: Boolean, rotateLandscapeFallback: Boolean, promise: Promise) {
     try {
       val source = File(sourcePath.removePrefix("file://"))
       if (!source.exists()) {
@@ -297,12 +387,32 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       
       val targetSpec = videoTargetSpec(variant, targetWidth, targetHeight)
       val targetCodec = videoCodecMimeType(codec)
-      if (isSourceCompatibleWithTarget(source, targetSpec, targetCodec)) {
+      if (!mirror && !rotateLandscapeFallback && isSourceCompatibleWithTarget(source, targetSpec, targetCodec)) {
         promise.resolve(source.absolutePath)
         return
       }
 
       val videoEffects = mutableListOf<Effect>()
+      if (mirror) {
+        videoEffects.add(
+            ScaleAndRotateTransformation.Builder()
+                .setScale(-1f, 1f)
+                .build()
+        )
+      }
+      val sourceDisplaySpec = readVideoDisplaySpec(source)
+      if (
+          targetSpec.width > targetSpec.height &&
+          rotateLandscapeFallback &&
+          sourceDisplaySpec != null &&
+          sourceDisplaySpec.height > sourceDisplaySpec.width
+      ) {
+        videoEffects.add(
+            ScaleAndRotateTransformation.Builder()
+                .setRotationDegrees(90f)
+                .build()
+        )
+      }
       videoEffects.add(
           Presentation.createForWidthAndHeight(
               targetSpec.width,
@@ -349,6 +459,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   }
 
   private data class VideoTargetSpec(val width: Int, val height: Int)
+  private data class VideoDisplaySpec(val width: Double, val height: Double, val mimeType: String?)
 
   private fun photoAspectForVariant(variant: String): Double {
     return when (variant) {
@@ -377,22 +488,27 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   }
 
   private fun isSourceCompatibleWithTarget(source: File, targetSpec: VideoTargetSpec, targetMimeType: String): Boolean {
+    val displaySpec = readVideoDisplaySpec(source) ?: return false
+    val sourceAspect = displaySpec.width / displaySpec.height
+    val targetAspect = targetSpec.width.toDouble() / targetSpec.height.toDouble()
+    return kotlin.math.abs(sourceAspect - targetAspect) < 0.015 && displaySpec.mimeType == targetMimeType
+  }
+
+  private fun readVideoDisplaySpec(source: File): VideoDisplaySpec? {
     val retriever = MediaMetadataRetriever()
     return try {
       retriever.setDataSource(source.absolutePath)
-      val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toDoubleOrNull() ?: return false
-      val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toDoubleOrNull() ?: return false
+      val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toDoubleOrNull() ?: return null
+      val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toDoubleOrNull() ?: return null
       val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-      if (width <= 0.0 || height <= 0.0) return false
+      if (width <= 0.0 || height <= 0.0) return null
 
       val displayWidth = if (rotation == 90 || rotation == 270) height else width
       val displayHeight = if (rotation == 90 || rotation == 270) width else height
-      val sourceAspect = displayWidth / displayHeight
-      val targetAspect = targetSpec.width.toDouble() / targetSpec.height.toDouble()
       val sourceMimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
-      kotlin.math.abs(sourceAspect - targetAspect) < 0.015 && sourceMimeType == targetMimeType
+      VideoDisplaySpec(displayWidth, displayHeight, sourceMimeType)
     } catch (_: Throwable) {
-      false
+      null
     } finally {
       try {
         retriever.release()
@@ -450,6 +566,24 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     val left = ((sourceWidth - cropWidth) / 2).coerceAtLeast(0)
     val top = ((sourceHeight - cropHeight) / 2).coerceAtLeast(0)
     return Bitmap.createBitmap(source, left, top, cropWidth, cropHeight)
+  }
+
+  private fun orientBitmapForTargetAspect(source: Bitmap, targetAspect: Double, rotateLandscapeFallback: Boolean): Bitmap {
+    val wantsLandscape = targetAspect > 1.0
+    val sourceIsPortrait = source.height > source.width
+    if (!rotateLandscapeFallback || !wantsLandscape || !sourceIsPortrait) return source
+
+    val matrix = Matrix().apply {
+      postRotate(90f)
+    }
+    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+  }
+
+  private fun mirrorBitmap(source: Bitmap): Bitmap {
+    val matrix = Matrix().apply {
+      preScale(-1f, 1f)
+    }
+    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
   }
 
   private fun safeSuffix(value: String): String {

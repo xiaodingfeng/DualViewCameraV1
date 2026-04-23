@@ -17,6 +17,7 @@ import {
   CommonResolutions,
   type CameraDevice,
   type CameraPosition,
+  type Orientation,
   type PreviewView,
   type Recorder,
   useCamera,
@@ -343,18 +344,23 @@ function CameraShell({
     viewMode,
   ]);
 
-  const isDeviceLandscape = physicalOrientation?.startsWith('landscape') ?? false;
-  const defaultSubOrientation: FrameOrientation = isDeviceLandscape ? 'portrait' : 'landscape';
+  const isDeviceLandscape = physicalOrientation === 'left' || physicalOrientation === 'right';
+  const shouldMirrorSavedMedia = cameraPosition === 'front';
+  const captureOutputOrientation: Orientation | null = physicalOrientation ?? null;
+  const displayPrimaryOrientation: FrameOrientation = 'portrait';
+  const displaySecondaryOrientation: FrameOrientation = 'landscape';
+  const savePrimaryOrientation: FrameOrientation = isDeviceLandscape ? 'landscape' : 'portrait';
+  const saveSecondaryOrientation: FrameOrientation = isDeviceLandscape ? 'portrait' : 'landscape';
 
   const mainDisplayOrientation: FrameOrientation =
       viewMode === 'dual'
-          ? (isSwapped ? defaultSubOrientation : 'portrait')
-          : (isDeviceLandscape ? 'landscape' : 'portrait');
+          ? (isSwapped ? displaySecondaryOrientation : displayPrimaryOrientation)
+          : displayPrimaryOrientation;
 
   const subDisplayOrientation: FrameOrientation =
       viewMode === 'dual'
-          ? (isSwapped ? 'portrait' : defaultSubOrientation)
-          : defaultSubOrientation;
+          ? (isSwapped ? displayPrimaryOrientation : displaySecondaryOrientation)
+          : displaySecondaryOrientation;
 
   const fullMainAspect =
       previewSize.width > 0 && previewSize.height > 0
@@ -371,9 +377,42 @@ function CameraShell({
       [selectedAspect, subDisplayOrientation],
   );
 
+  const saveMainOrientation: FrameOrientation =
+      viewMode === 'dual'
+          ? (isSwapped ? saveSecondaryOrientation : savePrimaryOrientation)
+          : savePrimaryOrientation;
+
+  const saveSubOrientation: FrameOrientation =
+      viewMode === 'dual'
+          ? (isSwapped ? savePrimaryOrientation : saveSecondaryOrientation)
+          : saveSecondaryOrientation;
+
+  const saveMainFrameSpec = useMemo(
+      () => visibleFrameSpec(saveMainOrientation, selectedAspect, fullMainAspect),
+      [fullMainAspect, saveMainOrientation, selectedAspect],
+  );
+
+  const saveSubFrameSpec = useMemo(
+      () => visibleFrameSpec(saveSubOrientation, selectedAspect, 3 / 4),
+      [saveSubOrientation, selectedAspect],
+  );
+  const shouldRotateMainLandscapeFallback = isDeviceLandscape && saveMainOrientation === 'landscape';
+  const shouldRotateSubLandscapeFallback = isDeviceLandscape && saveSubOrientation === 'landscape';
+
+  useEffect(() => {
+    if (captureOutputOrientation == null) return;
+
+    photoOutput.outputOrientation = captureOutputOrientation;
+    videoOutput.outputOrientation = captureOutputOrientation;
+  }, [
+    captureOutputOrientation,
+    photoOutput,
+    videoOutput,
+  ]);
+
   const isFullPreview =
       selectedAspectId === 'full' &&
-      ((viewMode === 'single' && !isDeviceLandscape) || (viewMode === 'dual' && mainDisplayOrientation === 'portrait'));
+      (viewMode === 'single' || (viewMode === 'dual' && mainDisplayOrientation === 'portrait'));
 
   const mainPreviewAspect = mainFrameSpec.aspect;
   const previewTopOffset = 0;
@@ -692,6 +731,8 @@ function CameraShell({
             dual: boolean;
             format: PhotoFormat;
             quality: number;
+            mirror: boolean;
+            rotateLandscapeFallback: { main: boolean; sub: boolean };
           },
       ) => {
         void (async () => {
@@ -703,6 +744,8 @@ function CameraShell({
                   options.subSpec,
                   options.format,
                   options.quality,
+                  options.mirror,
+                  options.rotateLandscapeFallback,
               );
 
               await Promise.all([
@@ -716,6 +759,8 @@ function CameraShell({
                   'main',
                   options.format,
                   options.quality,
+                  options.mirror,
+                  options.rotateLandscapeFallback.main,
               );
               await saveToGallery(mainPath, 'photo', '主画面');
             }
@@ -761,6 +806,10 @@ function CameraShell({
     const torchWasEnabled = await prepareFlashForPhoto();
 
     try {
+      if (captureOutputOrientation != null) {
+        photoOutput.outputOrientation = captureOutputOrientation;
+      }
+
       const file = await photoOutput.capturePhotoToFile(
           {
             flashMode: device?.hasFlash ? flashMode : 'off',
@@ -770,11 +819,16 @@ function CameraShell({
       );
 
       saveCapturedPhotoInBackground(file.filePath, {
-        mainSpec: mainFrameSpec,
-        subSpec: subFrameSpec,
+        mainSpec: saveMainFrameSpec,
+        subSpec: saveSubFrameSpec,
         dual: viewMode === 'dual' && saveDualOutputs,
         format: photoFormat,
         quality: photoQualityConfig.nativeQuality,
+        mirror: shouldMirrorSavedMedia,
+        rotateLandscapeFallback: {
+          main: shouldRotateMainLandscapeFallback,
+          sub: shouldRotateSubLandscapeFallback,
+        },
       });
     } catch (error) {
       setToast(cameraErrorMessage(error, '拍照失败'));
@@ -786,10 +840,10 @@ function CameraShell({
   }, [
     captureMode,
     cleanupFlashAfterPhoto,
+    captureOutputOrientation,
     device?.hasFlash,
     flashMode,
     isBusy,
-    mainFrameSpec,
     pendingPhotoCapture,
     photoFormat,
     photoOutput,
@@ -797,7 +851,11 @@ function CameraShell({
     prepareFlashForPhoto,
     saveCapturedPhotoInBackground,
     saveDualOutputs,
-    subFrameSpec,
+    saveMainFrameSpec,
+    saveSubFrameSpec,
+    shouldMirrorSavedMedia,
+    shouldRotateMainLandscapeFallback,
+    shouldRotateSubLandscapeFallback,
     viewMode,
   ]);
 
@@ -812,24 +870,28 @@ function CameraShell({
   const finishRecording = useCallback(
       async (filePath: string) => {
         try {
-          const mainVariant = mainFrameSpec.variant;
+          const mainVariant = saveMainFrameSpec.variant;
           const mainPath = await createVideoVariant(
               filePath,
               mainVariant,
               'main',
-              videoFrameSize(mainFrameSpec),
+              videoFrameSize(saveMainFrameSpec),
               videoCodec,
+              shouldMirrorSavedMedia,
+              shouldRotateMainLandscapeFallback,
           );
           await saveToGallery(mainPath, 'video', '主画面');
 
           if (viewMode === 'dual' && saveDualOutputs) {
-            const subVariant = subFrameSpec.variant;
+            const subVariant = saveSubFrameSpec.variant;
             const subPath = await createVideoVariant(
                 filePath,
                 subVariant,
                 'sub',
-                videoFrameSize(subFrameSpec),
+                videoFrameSize(saveSubFrameSpec),
                 videoCodec,
+                shouldMirrorSavedMedia,
+                shouldRotateSubLandscapeFallback,
             );
             await saveToGallery(subPath, 'video', '副画面');
           }
@@ -837,7 +899,7 @@ function CameraShell({
           setToast('录像保存失败');
         }
       },
-      [mainFrameSpec, saveDualOutputs, saveToGallery, subFrameSpec, videoCodec, videoFrameSize, viewMode],
+      [saveMainFrameSpec, saveDualOutputs, saveToGallery, saveSubFrameSpec, shouldMirrorSavedMedia, shouldRotateMainLandscapeFallback, shouldRotateSubLandscapeFallback, videoCodec, videoFrameSize, viewMode],
   );
 
   const toggleRecording = useCallback(async () => {
@@ -854,6 +916,10 @@ function CameraShell({
       if (isRecording && recorderRef.current != null) {
         await recorderRef.current.stopRecording();
         return;
+      }
+
+      if (captureOutputOrientation != null) {
+        videoOutput.outputOrientation = captureOutputOrientation;
       }
 
       const recorder = await videoOutput.createRecorder({});
@@ -885,7 +951,7 @@ function CameraShell({
       setIsBusy(false);
       setPendingVideoStart(false);
     }
-  }, [captureMode, finishRecording, isBusy, isRecording, pendingVideoStart, videoOutput, viewMode]);
+  }, [captureMode, captureOutputOrientation, finishRecording, isBusy, isRecording, pendingVideoStart, videoOutput, viewMode]);
 
   useEffect(() => {
     if (!pendingVideoStart) return;
