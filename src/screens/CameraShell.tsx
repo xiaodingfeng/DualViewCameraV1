@@ -44,6 +44,7 @@ import {
 } from '../components/CameraPrimitives';
 import { GalleryView } from '../components/GalleryModal';
 import { SettingsModal } from '../components/SettingsModal';
+import { DualViewMedia } from '../native/dualViewMedia';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 import { styles } from '../styles/cameraStyles';
@@ -1156,7 +1157,14 @@ function CameraShell({
   const handleGalleryDelete = useCallback(
       async (item: GalleryMedia) => {
         try {
-          await CameraRoll.deletePhotos([item.uri]);
+          if (DualViewMedia?.deleteMedia) {
+            const deleted = await DualViewMedia.deleteMedia(item.uri);
+            if (!deleted) {
+              throw new Error('Media item was not deleted');
+            }
+          } else {
+            await CameraRoll.deletePhotos([item.uri]);
+          }
           const nextItems = galleryItems.filter(media => media.id !== item.id);
           setGalleryItems(nextItems);
           setLastMedia(mediaToLastMedia(nextItems[0] ?? null));

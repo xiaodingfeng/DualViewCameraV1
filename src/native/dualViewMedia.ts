@@ -129,6 +129,7 @@ export const { DualViewMedia } = NativeModules as {
       mirror: boolean,
       rotateLandscapeFallback: boolean,
     ): Promise<string>;
+    deleteMedia?(uri: string): Promise<boolean>;
     shareMedia?(uri: string, mimeType: string, title: string): Promise<boolean>;
   };
 };

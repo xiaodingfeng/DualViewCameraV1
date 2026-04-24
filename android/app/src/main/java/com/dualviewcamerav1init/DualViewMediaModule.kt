@@ -65,6 +65,24 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun deleteMedia(uriString: String, promise: Promise) {
+    try {
+      val uri = Uri.parse(uriString)
+      if (uri.scheme == "file" || uri.scheme.isNullOrBlank()) {
+        val path = uri.path ?: uriString.removePrefix("file://")
+        val file = File(path)
+        promise.resolve(!file.exists() || file.delete())
+        return
+      }
+
+      val deletedRows = reactContext.contentResolver.delete(uri, null, null)
+      promise.resolve(deletedRows > 0)
+    } catch (error: Throwable) {
+      promise.reject("EDELETE", error.message, error)
+    }
+  }
+
+  @ReactMethod
   fun getMediaStoragePath(uriString: String, promise: Promise) {
     try {
       val uri = Uri.parse(uriString)
