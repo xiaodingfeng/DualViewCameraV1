@@ -194,9 +194,10 @@ function CameraShell({
     if (isVideoSessionRequired) {
       setIsVideoSessionTarget(true);
     } else {
-      // Delay switching back from video-pipe to dual-preview pipe by 400ms
-      // to move the hardware flicker away from the "Stop" button press.
-      const timer = setTimeout(() => setIsVideoSessionTarget(false), 400);
+      // Priority: Keep Main Preview stable. Delay the Sub-preview (PIP) 
+      // recovery even longer (1000ms) to ensure the hardware finishes 
+      // its primary session reconfiguration first.
+      const timer = setTimeout(() => setIsVideoSessionTarget(false), 1000);
       return () => clearTimeout(timer);
     }
   }, [isVideoSessionRequired]);
@@ -311,25 +312,25 @@ function CameraShell({
     lastViewMode.current = viewMode;
     lastCaptureMode.current = captureMode;
 
-    // Session only reconfigures when switching viewMode
-    const needsDelay = viewMode === 'dual';
+    // Only perform a "Hard Reset" (bumping sessionRevision) when switching 
+    // between Single and Dual view modes, as the UI layout changes significantly.
+    // For mode switching within the same viewMode, let vision-camera 
+    // handle the session update smoothly without unmounting the view.
+    const needsHardReset = isViewModeChange;
+    
     setIsSwitching(true);
-
-    // If we change viewMode or we are in the sensitive dual mode,
-    // reset ready state to show loading instead of a frozen frame during reconfiguration.
-    // Also force a hard reset (sessionRevision bump) if changing modes in dual-view to purge buffers.
-    if (isViewModeChange || (isCaptureModeChange && viewMode === 'dual')) {
+    if (needsHardReset) {
       setIsCameraReady(false);
       setSessionRevision(curr => curr + 1);
     }
 
-    // If we are switching to video mode, pre-warm the video settings to avoid re-binding during record start
     if (captureMode === 'video') {
       if (appliedVideoFps !== videoFps) setAppliedVideoFps(videoFps);
       if (appliedVideoQuality !== videoQuality) setAppliedVideoQuality(videoQuality);
     }
 
-    const timer = setTimeout(() => setIsSwitching(false), needsDelay ? 600 : 50);
+    const delay = (viewMode === 'dual') ? 600 : (needsHardReset ? 300 : 50);
+    const timer = setTimeout(() => setIsSwitching(false), delay);
     return () => clearTimeout(timer);
   }, [captureMode, viewMode, videoFps, videoQuality, appliedVideoFps, appliedVideoQuality]);
 
@@ -867,7 +868,7 @@ function CameraShell({
       const file = await photoOutput.capturePhotoToFile(
           {
             flashMode: device?.hasFlash ? flashMode : 'off',
-            enableShutterSound: true,
+            enableShutterSound: false,
           },
           {},
       );
@@ -1042,6 +1043,8 @@ function CameraShell({
     return () => clearTimeout(timer);
   }, [pendingVideoStart, toggleRecording]);
 
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const focusAtPoint = useCallback(
       async (event: GestureResponderEvent) => {
         setIsRulerMode(false);
@@ -1056,6 +1059,13 @@ function CameraShell({
             autoResetAfter: 4,
           });
           setFocusPoint({ x: locationX, y: locationY });
+
+          // Auto-hide the focus box after 2.5 seconds
+          if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+          focusTimerRef.current = setTimeout(() => {
+            setFocusPoint(null);
+            focusTimerRef.current = null;
+          }, 2500);
         } catch {}
       },
       [cameraController],
