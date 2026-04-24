@@ -67,7 +67,7 @@ import {
   cameraErrorMessage,
   clamp,
   isCameraResourceBusyError,
-  safeSupportsFPS,
+  videoFpsOptionsForQuality,
   videoTargetSizeForAspect,
   visibleFrameSpec,
   wait,
@@ -391,7 +391,7 @@ function CameraShell({
   ]);
 
   const isDeviceLandscape = physicalOrientation === 'left' || physicalOrientation === 'right';
-  const shouldMirrorSavedMedia = cameraPosition === 'front';
+  const shouldMirrorSavedPhoto = cameraPosition === 'front';
   const captureOutputOrientation: Orientation | null = physicalOrientation ?? null;
   const displayPrimaryOrientation: FrameOrientation = 'portrait';
   const displaySecondaryOrientation: FrameOrientation = 'landscape';
@@ -475,9 +475,8 @@ function CameraShell({
   );
 
   const videoFpsOptions = useMemo<VideoFps[]>(() => {
-    const supports60 = safeSupportsFPS(device, 60);
-    return supports60 ? [30, 60] : [30];
-  }, [device]);
+    return videoFpsOptionsForQuality(device, videoQuality);
+  }, [device, videoQuality]);
 
   const videoFrameSize = useCallback(
       (spec: VisibleFrameSpec) => videoTargetSizeForAspect(spec.aspect, appliedVideoQualityConfig),
@@ -589,6 +588,7 @@ function CameraShell({
     constraints: cameraConstraints,
     isActive: isAppActive && !galleryOpen,
     orientationSource: 'device',
+    mirrorMode: cameraPosition === 'front' ? 'on' : 'off',
     getInitialZoom,
     onStarted: handleCameraStarted,
     onError: handleCameraError,
@@ -609,18 +609,20 @@ function CameraShell({
   useEffect(() => {
     if (!device) return;
 
-    if (!safeSupportsFPS(device, videoFps)) {
+    const options = videoFpsOptionsForQuality(device, videoQuality);
+    if (!options.includes(videoFps)) {
       setVideoFps(30);
     }
-  }, [device, videoFps]);
+  }, [device, videoFps, videoQuality]);
 
   useEffect(() => {
     if (!device) return;
 
-    if (!safeSupportsFPS(device, appliedVideoFps)) {
+    const options = videoFpsOptionsForQuality(device, appliedVideoQuality);
+    if (!options.includes(appliedVideoFps)) {
       setAppliedVideoFps(30);
     }
-  }, [appliedVideoFps, device]);
+  }, [appliedVideoFps, appliedVideoQuality, device]);
 
   useEffect(() => {
     if (captureMode === 'video') {
@@ -886,7 +888,7 @@ function CameraShell({
         dual: viewMode === 'dual' && saveDualOutputs,
         format: photoFormat,
         quality: photoQualityConfig.nativeQuality,
-        mirror: shouldMirrorSavedMedia,
+        mirror: shouldMirrorSavedPhoto,
         rotateLandscapeFallback: {
           main: shouldRotateMainLandscapeFallback,
           sub: shouldRotateSubLandscapeFallback,
@@ -915,7 +917,7 @@ function CameraShell({
     saveDualOutputs,
     saveMainFrameSpec,
     saveSubFrameSpec,
-    shouldMirrorSavedMedia,
+    shouldMirrorSavedPhoto,
     shouldRotateMainLandscapeFallback,
     shouldRotateSubLandscapeFallback,
     shutterSoundEnabled,
@@ -932,37 +934,37 @@ function CameraShell({
 
   const finishRecording = useCallback(
       async (filePath: string) => {
+        let originalSaved = false;
         try {
-          const mainVariant = saveMainFrameSpec.variant;
-          const mainPath = await createVideoVariant(
-              filePath,
-              mainVariant,
-              'main',
-              videoFrameSize(saveMainFrameSpec),
-              videoCodec,
-              shouldMirrorSavedMedia,
-              shouldRotateMainLandscapeFallback,
-          );
-          await saveToGallery(mainPath, 'video', '主画面');
+          await saveToGallery(filePath, 'video', '主画面');
+          originalSaved = true;
+          setToast(viewMode === 'dual' && saveDualOutputs ? '主画面视频已保存，副画面稍后后台处理' : '视频已保存');
 
           if (viewMode === 'dual' && saveDualOutputs) {
-            const subVariant = saveSubFrameSpec.variant;
-            const subPath = await createVideoVariant(
-                filePath,
-                subVariant,
-                'sub',
-                videoFrameSize(saveSubFrameSpec),
-                videoCodec,
-                shouldMirrorSavedMedia,
-                shouldRotateSubLandscapeFallback,
-            );
-            await saveToGallery(subPath, 'video', '副画面');
+            void (async () => {
+              try {
+                const subVariant = saveSubFrameSpec.variant;
+                const subPath = await createVideoVariant(
+                    filePath,
+                    subVariant,
+                    'sub',
+                    videoFrameSize(saveSubFrameSpec),
+                    videoCodec,
+                    false,
+                    shouldRotateSubLandscapeFallback,
+                );
+                await saveToGallery(subPath, 'video', '副画面');
+                setToast('副画面视频已保存');
+              } catch {
+                setToast('副画面视频后台处理失败，已保留主画面视频');
+              }
+            })();
           }
         } catch {
-          setToast('录像保存失败');
+          setToast(originalSaved ? '副画面视频后台处理失败，已保留主画面视频' : '录像保存失败');
         }
       },
-      [saveMainFrameSpec, saveDualOutputs, saveToGallery, saveSubFrameSpec, shouldMirrorSavedMedia, shouldRotateMainLandscapeFallback, shouldRotateSubLandscapeFallback, videoCodec, videoFrameSize, viewMode],
+      [saveDualOutputs, saveToGallery, saveSubFrameSpec, shouldRotateSubLandscapeFallback, videoCodec, videoFrameSize, viewMode],
   );
 
   const toggleRecording = useCallback(async () => {

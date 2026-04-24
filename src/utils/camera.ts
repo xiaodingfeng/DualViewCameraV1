@@ -122,6 +122,14 @@ export function safeSupportsFPS(device: CameraDevice, fps: VideoFps): boolean {
   }
 }
 
+export function videoFpsOptionsForQuality(
+  device: CameraDevice,
+  quality: VideoQuality,
+): VideoFps[] {
+  if (quality === '8K') return [30];
+  return safeSupportsFPS(device, 60) ? [30, 60] : [30];
+}
+
 export function nextFps(current: VideoFps, options: VideoFps[]): VideoFps {
   const currentIndex = options.indexOf(current);
   return options[(currentIndex + 1) % options.length] ?? 30;

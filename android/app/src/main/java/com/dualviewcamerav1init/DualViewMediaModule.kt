@@ -30,6 +30,7 @@ import com.facebook.react.bridge.WritableNativeMap
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
@@ -38,6 +39,9 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
   private val activeTransformers = ConcurrentHashMap<String, Transformer>()
+  private val videoTransformQueue = ArrayDeque<VideoTransformTask>()
+  private val videoTransformQueueLock = Any()
+  private var activeVideoTransformTask: VideoTransformTask? = null
 
   override fun getName(): String = "DualViewMedia"
 
@@ -384,7 +388,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
           reactContext.cacheDir,
           "DualViewCamera_${safeSuffix(suffix)}_${safeVariant(variant)}_${System.currentTimeMillis()}.mp4"
       )
-      
+
       val targetSpec = videoTargetSpec(variant, targetWidth, targetHeight)
       val targetCodec = videoCodecMimeType(codec)
       if (!mirror && !rotateLandscapeFallback && isSourceCompatibleWithTarget(source, targetSpec, targetCodec)) {
@@ -392,18 +396,65 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
         return
       }
 
+      enqueueVideoTransform(
+          VideoTransformTask(
+              source = source,
+              target = target,
+              targetSpec = targetSpec,
+              targetCodec = targetCodec,
+              mirror = mirror,
+              rotateLandscapeFallback = rotateLandscapeFallback,
+              promise = promise
+          )
+      )
+    } catch (error: Throwable) {
+      promise.reject("EVIDEO", error.message, error)
+    }
+  }
+
+  private fun enqueueVideoTransform(task: VideoTransformTask) {
+    synchronized(videoTransformQueueLock) {
+      videoTransformQueue.add(task)
+      if (activeVideoTransformTask != null) return
+    }
+    processNextVideoTransform()
+  }
+
+  private fun processNextVideoTransform() {
+    val nextTask = synchronized(videoTransformQueueLock) {
+      if (activeVideoTransformTask != null || videoTransformQueue.isEmpty()) {
+        null
+      } else {
+        videoTransformQueue.removeFirst().also { activeVideoTransformTask = it }
+      }
+    } ?: return
+
+    startVideoTransform(nextTask)
+  }
+
+  private fun completeVideoTransform(task: VideoTransformTask) {
+    synchronized(videoTransformQueueLock) {
+      if (activeVideoTransformTask === task) {
+        activeVideoTransformTask = null
+      }
+    }
+    processNextVideoTransform()
+  }
+
+  private fun startVideoTransform(task: VideoTransformTask) {
+    try {
       val videoEffects = mutableListOf<Effect>()
-      if (mirror) {
+      if (task.mirror) {
         videoEffects.add(
             ScaleAndRotateTransformation.Builder()
                 .setScale(-1f, 1f)
                 .build()
         )
       }
-      val sourceDisplaySpec = readVideoDisplaySpec(source)
+      val sourceDisplaySpec = readVideoDisplaySpec(task.source)
       if (
-          targetSpec.width > targetSpec.height &&
-          rotateLandscapeFallback &&
+          task.targetSpec.width > task.targetSpec.height &&
+          task.rotateLandscapeFallback &&
           sourceDisplaySpec != null &&
           sourceDisplaySpec.height > sourceDisplaySpec.width
       ) {
@@ -415,21 +466,22 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       }
       videoEffects.add(
           Presentation.createForWidthAndHeight(
-              targetSpec.width,
-              targetSpec.height,
+              task.targetSpec.width,
+              task.targetSpec.height,
               Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
           )
       )
 
-      val editedMediaItem = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(source)))
+      val editedMediaItem = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(task.source)))
           .setEffects(Effects(emptyList(), videoEffects))
           .build()
-      
+
       val transformerId = UUID.randomUUID().toString()
       val listener = object : Transformer.Listener {
         override fun onCompleted(composition: Composition, exportResult: ExportResult) {
           activeTransformers.remove(transformerId)
-          promise.resolve(target.absolutePath)
+          task.promise.resolve(task.target.absolutePath)
+          completeVideoTransform(task)
         }
 
         override fun onError(
@@ -439,24 +491,37 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
         ) {
           activeTransformers.remove(transformerId)
           try {
-            copyFile(source, target)
-            promise.resolve(target.absolutePath)
+            copyFile(task.source, task.target)
+            task.promise.resolve(task.target.absolutePath)
           } catch (_: Throwable) {
-            promise.reject("EVIDEO", exportException.message, exportException)
+            task.promise.reject("EVIDEO", exportException.message, exportException)
+          } finally {
+            completeVideoTransform(task)
           }
         }
       }
       val transformer = Transformer.Builder(reactContext)
-          .setVideoMimeType(targetCodec)
+          .setVideoMimeType(task.targetCodec)
           .setAudioMimeType(MimeTypes.AUDIO_AAC)
           .addListener(listener)
           .build()
       activeTransformers.put(transformerId, transformer)
-      transformer.start(editedMediaItem, target.absolutePath)
+      transformer.start(editedMediaItem, task.target.absolutePath)
     } catch (error: Throwable) {
-      promise.reject("EVIDEO", error.message, error)
+      task.promise.reject("EVIDEO", error.message, error)
+      completeVideoTransform(task)
     }
   }
+
+  private data class VideoTransformTask(
+      val source: File,
+      val target: File,
+      val targetSpec: VideoTargetSpec,
+      val targetCodec: String,
+      val mirror: Boolean,
+      val rotateLandscapeFallback: Boolean,
+      val promise: Promise
+  )
 
   private data class VideoTargetSpec(val width: Int, val height: Int)
   private data class VideoDisplaySpec(val width: Double, val height: Double, val mimeType: String?)
