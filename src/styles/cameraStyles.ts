@@ -61,7 +61,7 @@ export const styles = StyleSheet.create({
   centerPointer: { position: 'absolute', width: 2.5, height: 22, backgroundColor: COLORS.accent, borderRadius: 2, zIndex: 3 },
   valueFloat: { position: 'absolute', right: 12, backgroundColor: 'rgba(0,0,0,0.28)', paddingHorizontal: 6, borderRadius: 10 },
   floatingValue: { color: COLORS.accent, fontSize: 13, fontWeight: '900' },
-  toast: { position: 'absolute', left: 24, right: 24, bottom: 150, zIndex: 30, alignItems: 'center' },
+  toast: { position: 'absolute', left: 24, right: 24, bottom: 230, zIndex: 40, alignItems: 'center' },
   toastText: { overflow: 'hidden', color: COLORS.text, fontSize: 13, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.65)' },
   bottomControls: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 26, paddingHorizontal: 22, paddingTop: 10, paddingBottom: 22, backgroundColor: 'transparent' },
   modeRow: { height: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 34 },
