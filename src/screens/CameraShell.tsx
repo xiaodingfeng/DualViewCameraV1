@@ -319,7 +319,9 @@ function CameraShell({
     // handle the session update smoothly without unmounting the view.
     const needsHardReset = isViewModeChange;
     
-    setIsSwitching(true);
+    if (needsHardReset || viewMode === 'dual') {
+      setIsSwitching(true);
+    }
     if (needsHardReset) {
       setIsCameraReady(false);
       setSessionRevision(curr => curr + 1);
@@ -330,7 +332,7 @@ function CameraShell({
       if (appliedVideoQuality !== videoQuality) setAppliedVideoQuality(videoQuality);
     }
 
-    const delay = (viewMode === 'dual') ? 600 : (needsHardReset ? 300 : 50);
+    const delay = (viewMode === 'dual') ? 600 : (needsHardReset ? 300 : 0);
     const timer = setTimeout(() => setIsSwitching(false), delay);
     return () => clearTimeout(timer);
   }, [captureMode, viewMode, videoFps, videoQuality, appliedVideoFps, appliedVideoQuality]);
@@ -509,11 +511,12 @@ function CameraShell({
        return [{ fps: 30 }]; 
     }
 
-    if (captureMode === 'video') {
-      return [{ fps: appliedVideoFps }, { resolutionBias: videoOutput }];
+    if (viewMode === 'single') {
+      return [{ fps: appliedVideoFps }];
     }
-    return [{ resolutionBias: photoOutput }];
-  }, [viewMode, captureMode, isVideoSessionTarget, appliedVideoFps, videoOutput, photoOutput]);
+
+    return [{ fps: appliedVideoFps }, { resolutionBias: videoOutput }];
+  }, [viewMode, isVideoSessionTarget, appliedVideoFps, videoOutput]);
 
   const initialZoomRef = useRef(zoom);
 
