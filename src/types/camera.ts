@@ -35,6 +35,7 @@ export type PersistedSettings = Partial<{
   videoCodec: VideoCodecFormat;
   viewMode: ViewMode;
   saveDualOutputs: boolean;
+  shutterSoundEnabled: boolean;
 }>;
 
 export type NativeVideoViewProps = ViewProps & { sourceUri: string };

@@ -166,6 +166,7 @@ function CameraShell({
   const [flashMode, setFlashMode] = useState<FlashMode>('off');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveDualOutputs, setSaveDualOutputs] = useState(true);
+  const [shutterSoundEnabled, setShutterSoundEnabled] = useState(false);
 
   const [zoom, setZoom] = useState(() => clamp(1, device.minZoom, device.maxZoom));
   const [isRulerMode, setIsRulerMode] = useState(false);
@@ -349,6 +350,7 @@ function CameraShell({
           if (isVideoCodecFormat(settings.videoCodec)) setVideoCodec(settings.videoCodec);
           if (isViewMode(settings.viewMode)) setViewMode(settings.viewMode);
           if (typeof settings.saveDualOutputs === 'boolean') setSaveDualOutputs(settings.saveDualOutputs);
+          if (typeof settings.shutterSoundEnabled === 'boolean') setShutterSoundEnabled(settings.shutterSoundEnabled);
         })
         .finally(() => {
           if (!cancelled) setSettingsLoaded(true);
@@ -371,6 +373,7 @@ function CameraShell({
       videoCodec,
       viewMode,
       saveDualOutputs,
+      shutterSoundEnabled,
     }).catch(() => {});
   }, [
     photoFormat,
@@ -378,6 +381,7 @@ function CameraShell({
     saveDualOutputs,
     selectedAspectId,
     settingsLoaded,
+    shutterSoundEnabled,
     videoCodec,
     videoFps,
     videoQuality,
@@ -868,7 +872,7 @@ function CameraShell({
       const file = await photoOutput.capturePhotoToFile(
           {
             flashMode: device?.hasFlash ? flashMode : 'off',
-            enableShutterSound: false,
+            enableShutterSound: shutterSoundEnabled,
           },
           {},
       );
@@ -911,6 +915,7 @@ function CameraShell({
     shouldMirrorSavedMedia,
     shouldRotateMainLandscapeFallback,
     shouldRotateSubLandscapeFallback,
+    shutterSoundEnabled,
     viewMode,
   ]);
 
@@ -1281,6 +1286,8 @@ function CameraShell({
             onPhotoQualityChange={setPhotoQuality}
             saveDualOutputs={saveDualOutputs}
             setSaveDualOutputs={setSaveDualOutputs}
+            shutterSoundEnabled={shutterSoundEnabled}
+            onShutterSoundEnabledChange={setShutterSoundEnabled}
             videoFps={videoFps}
             videoFpsOptions={videoFpsOptions}
             onVideoFpsChange={setVideoFps}

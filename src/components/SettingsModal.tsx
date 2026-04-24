@@ -36,6 +36,8 @@ function SettingsModal({
   onPhotoQualityChange,
   saveDualOutputs,
   setSaveDualOutputs,
+  shutterSoundEnabled,
+  onShutterSoundEnabledChange,
   videoFps,
   videoFpsOptions,
   onVideoFpsChange,
@@ -57,6 +59,8 @@ function SettingsModal({
   onPhotoQualityChange: (value: PhotoQuality) => void;
   saveDualOutputs: boolean;
   setSaveDualOutputs: (value: boolean) => void;
+  shutterSoundEnabled: boolean;
+  onShutterSoundEnabledChange: (value: boolean) => void;
   videoFps: VideoFps;
   videoFpsOptions: VideoFps[];
   onVideoFpsChange: (value: VideoFps) => void;
@@ -144,6 +148,10 @@ function SettingsModal({
                   {(['high', 'standard', 'low'] as PhotoQuality[]).map(value => (
                     <Chip key={value} active={photoQuality === value} label={PHOTO_QUALITY_CONFIG[value].label} onPress={() => onPhotoQualityChange(value)} />
                   ))}
+                </SettingsSection>
+                <SettingsSection title="快门声音">
+                  <Chip active={!shutterSoundEnabled} label="关闭" onPress={() => onShutterSoundEnabledChange(false)} />
+                  <Chip active={shutterSoundEnabled} label="开启" onPress={() => onShutterSoundEnabledChange(true)} />
                 </SettingsSection>
                 <SettingsSection title="照片格式">
                   {(['jpeg', 'heic'] as PhotoFormat[]).map(value => (
