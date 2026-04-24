@@ -702,11 +702,51 @@ function CameraShell({
 
   useEffect(() => {
     if (cameraController == null || typeof (cameraController as any).setTorchMode !== 'function') return;
-    const shouldEnableTorch = captureMode === 'video' && flashMode === 'on' && device.hasTorch;
-    (cameraController as any)
-        .setTorchMode(shouldEnableTorch ? 'on' : 'off', shouldEnableTorch ? 1 : undefined)
-        .catch(() => {});
-  }, [cameraController, captureMode, device.hasTorch, flashMode]);
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const shouldEnableTorch =
+        captureMode === 'video' &&
+        flashMode === 'on' &&
+        device.hasTorch &&
+        isAppActive &&
+        !galleryOpen;
+
+    const applyTorchMode = async (attempt = 0) => {
+      try {
+        await (cameraController as any).setTorchMode(shouldEnableTorch ? 'on' : 'off');
+      } catch (error) {
+        if (cancelled || !shouldEnableTorch) return;
+        if (attempt < 2) {
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            applyTorchMode(attempt + 1);
+          }, 180);
+          return;
+        }
+        setFlashMode('off');
+        setToast(cameraErrorMessage(error, '无法开启常亮闪光灯'));
+      }
+    };
+
+    applyTorchMode();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer != null) clearTimeout(retryTimer);
+    };
+  }, [
+    cameraController,
+    captureMode,
+    device.hasTorch,
+    flashMode,
+    galleryOpen,
+    isAppActive,
+    isCameraReady,
+    isRecording,
+    isVideoSessionTarget,
+    pendingVideoStart,
+  ]);
 
   useEffect(() => {
     if (
@@ -840,7 +880,7 @@ function CameraShell({
     if (flashMode !== 'on' || cameraController == null || !device?.hasTorch) return false;
 
     try {
-      await cameraController.setTorchMode('on', 1);
+      await cameraController.setTorchMode('on');
       await wait(160);
       return true;
     } catch {
