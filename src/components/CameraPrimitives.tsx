@@ -18,7 +18,7 @@ import SettingsIcon from '../../assets/icons/settings.svg';
 import SwitchCameraIcon from '../../assets/icons/switch.svg';
 
 import { CompositionOverlay } from './CompositionOverlay';
-import { ASPECT_RATIOS, PX_PER_ZOOM, VIDEO_QUALITY_CONFIG, ZOOM_BAR_WIDTH } from '../config/camera';
+import { ASPECT_RATIOS, PX_PER_ZOOM, TOP_BAR_OFFSET, VIDEO_QUALITY_CONFIG, ZOOM_BAR_WIDTH } from '../config/camera';
 import { styles } from '../styles/cameraStyles';
 import type {
   AspectRatioId,
@@ -26,6 +26,8 @@ import type {
   FlashMode,
   FrameOrientation,
   LastMedia,
+  PipAnchor,
+  PipLayoutConfig,
   SafetyOverlayMode,
   VideoFps,
   VideoQuality,
@@ -234,6 +236,54 @@ export function BottomControls({
   );
 }
 
+const PIP_DRAG_THRESHOLD = 8;
+const PIP_MARGIN_X = 18;
+const PIP_TOP_MARGIN = TOP_BAR_OFFSET + 58;
+const PIP_BOTTOM_MARGIN = 228;
+const PIP_SCALE_FACTORS = {
+  small: 0.86,
+  medium: 1,
+  large: 1.15,
+} as const;
+
+function scaledPipFrameSize(aspectRatio: number, scale: PipLayoutConfig['scale']) {
+  const base = pipFrameSize(aspectRatio);
+  const factor = PIP_SCALE_FACTORS[scale];
+  return {
+    width: Math.round(base.width * factor),
+    height: Math.round(base.height * factor),
+  };
+}
+
+function pipAnchorPosition(
+  layout: PipLayoutConfig,
+  previewSize: { width: number; height: number },
+  pipSize: { width: number; height: number },
+) {
+  const maxLeft = Math.max(0, previewSize.width - pipSize.width);
+  const maxTop = Math.max(0, previewSize.height - pipSize.height);
+  const left = layout.anchor.endsWith('right') ? maxLeft - layout.marginX : layout.marginX;
+  const top = layout.anchor.startsWith('bottom') ? maxTop - layout.marginY : layout.marginY;
+
+  return {
+    left: clamp(left, 0, maxLeft),
+    top: clamp(top, 0, maxTop),
+  };
+}
+
+function nearestPipAnchor(
+  left: number,
+  top: number,
+  previewSize: { width: number; height: number },
+  pipSize: { width: number; height: number },
+): PipAnchor {
+  const centerX = left + pipSize.width / 2;
+  const centerY = top + pipSize.height / 2;
+  const vertical = centerY < previewSize.height / 2 ? 'top' : 'bottom';
+  const horizontal = centerX < previewSize.width / 2 ? 'left' : 'right';
+  return `${vertical}-${horizontal}` as PipAnchor;
+}
+
 export function PipPreview({
   aspectRatio,
   cropSpec,
@@ -242,7 +292,11 @@ export function PipPreview({
   orientation,
   onPress,
   overlayMode,
+  layout,
+  onGestureActiveChange,
+  onLayoutChange,
   previewOutput,
+  previewSize,
   sessionRevision,
   placeholderMode,
 }: {
@@ -253,15 +307,85 @@ export function PipPreview({
   orientation: FrameOrientation;
   onPress: () => void;
   overlayMode: SafetyOverlayMode;
+  layout: PipLayoutConfig;
+  onGestureActiveChange?: (active: boolean) => void;
+  onLayoutChange: (layout: PipLayoutConfig) => void;
   previewOutput: any | null;
+  previewSize: { width: number; height: number };
   sessionRevision: number;
   placeholderMode: 'photo' | 'video' | null;
 }) {
-  const pipSize = useMemo(() => pipFrameSize(aspectRatio), [aspectRatio]);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const draggedRef = useRef(false);
+  const pipSize = useMemo(() => scaledPipFrameSize(aspectRatio, layout.scale), [aspectRatio, layout.scale]);
+  const anchorPosition = useMemo(
+    () => pipAnchorPosition(layout, previewSize, pipSize),
+    [layout, pipSize, previewSize.height, previewSize.width],
+  );
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          Math.abs(gesture.dx) > PIP_DRAG_THRESHOLD || Math.abs(gesture.dy) > PIP_DRAG_THRESHOLD,
+        onPanResponderGrant: () => {
+          draggedRef.current = false;
+          onGestureActiveChange?.(true);
+          setDragOffset({ x: 0, y: 0 });
+        },
+        onPanResponderMove: (_event, gesture) => {
+          if (Math.abs(gesture.dx) > PIP_DRAG_THRESHOLD || Math.abs(gesture.dy) > PIP_DRAG_THRESHOLD) {
+            draggedRef.current = true;
+          }
+          setDragOffset({ x: gesture.dx, y: gesture.dy });
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          const wasDragged = draggedRef.current;
+          draggedRef.current = false;
+          onGestureActiveChange?.(false);
+          setDragOffset({ x: 0, y: 0 });
+
+          if (!wasDragged) {
+            onPress();
+            return;
+          }
+
+          const maxLeft = Math.max(0, previewSize.width - pipSize.width);
+          const maxTop = Math.max(0, previewSize.height - pipSize.height);
+          const nextLeft = clamp(anchorPosition.left + gesture.dx, 0, maxLeft);
+          const nextTop = clamp(anchorPosition.top + gesture.dy, 0, maxTop);
+          const nextAnchor = nearestPipAnchor(nextLeft, nextTop, previewSize, pipSize);
+
+          onLayoutChange({
+            ...layout,
+            anchor: nextAnchor,
+            marginX: PIP_MARGIN_X,
+            marginY: nextAnchor.startsWith('top') ? PIP_TOP_MARGIN : PIP_BOTTOM_MARGIN,
+          });
+        },
+        onPanResponderTerminate: () => {
+          draggedRef.current = false;
+          onGestureActiveChange?.(false);
+          setDragOffset({ x: 0, y: 0 });
+        },
+      }),
+    [anchorPosition.left, anchorPosition.top, layout, onGestureActiveChange, onLayoutChange, onPress, pipSize, previewSize],
+  );
   const placeholderTitle = placeholderMode === 'photo' ? '拍照中' : '录制中';
 
   return (
-    <View style={[styles.pip, pipSize]}>
+    <View
+      {...panResponder.panHandlers}
+      style={[
+        styles.pip,
+        pipSize,
+        {
+          left: anchorPosition.left,
+          top: anchorPosition.top,
+          transform: [{ translateX: dragOffset.x }, { translateY: dragOffset.y }],
+        },
+      ]}
+    >
       {previewOutput ? (
         <NativePreviewView
           key={`pip-${sessionRevision}`}
@@ -286,7 +410,7 @@ export function PipPreview({
       <Text style={styles.pipLabel}>
         {placeholderMode ? placeholderTitle : isSwapped ? '主画面' : `副 ${formatAspectLabel(aspectRatio)}`}
       </Text>
-      <Pressable style={styles.pipTouchLayer} onPress={onPress} />
+      <View pointerEvents="none" style={styles.pipTouchLayer} />
     </View>
   );
 }

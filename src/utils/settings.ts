@@ -4,6 +4,9 @@ import { SETTINGS_PATH } from '../config/camera';
 import type {
   AspectRatioId,
   PersistedSettings,
+  PipAnchor,
+  PipLayoutConfig,
+  PipScale,
   PhotoFormat,
   PhotoQuality,
   SafetyOverlayMode,
@@ -57,4 +60,29 @@ export function isSafetyOverlayMode(value: unknown): value is SafetyOverlayMode 
 
 export function isViewMode(value: unknown): value is ViewMode {
   return value === 'single' || value === 'dual';
+}
+
+export function isPipAnchor(value: unknown): value is PipAnchor {
+  return value === 'top-left' || value === 'top-right' || value === 'bottom-left' || value === 'bottom-right';
+}
+
+export function isPipScale(value: unknown): value is PipScale {
+  return value === 'small' || value === 'medium' || value === 'large';
+}
+
+export function isPipLayoutConfig(value: unknown): value is PipLayoutConfig {
+  if (value == null || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    isPipAnchor(candidate.anchor) &&
+    isPipScale(candidate.scale) &&
+    typeof candidate.marginX === 'number' &&
+    Number.isFinite(candidate.marginX) &&
+    candidate.marginX >= 0 &&
+    candidate.marginX <= 120 &&
+    typeof candidate.marginY === 'number' &&
+    Number.isFinite(candidate.marginY) &&
+    candidate.marginY >= 0 &&
+    candidate.marginY <= 320
+  );
 }

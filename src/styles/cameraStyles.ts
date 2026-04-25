@@ -39,7 +39,7 @@ export const styles = StyleSheet.create({
   roundButtonActive: { backgroundColor: 'rgba(255,209,102,0.18)', opacity: 0.88 },
   roundButtonText: { color: COLORS.text, fontSize: 14, fontWeight: '800' },
   noBorderButton: { backgroundColor: 'transparent', borderWidth: 0, minWidth: 42 },
-  pip: { position: 'absolute', left: 18, bottom: 228, zIndex: 18, overflow: 'hidden', borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: '#000' },
+  pip: { position: 'absolute', zIndex: 18, overflow: 'hidden', borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: '#000' },
   pipLabel: { position: 'absolute', left: 6, bottom: 5, color: COLORS.text, fontSize: 10, fontWeight: '800', textShadowColor: '#000', textShadowRadius: 3 },
   pipTouchLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 2 },
   pipPlaceholder: { flex: 1, backgroundColor: 'rgba(10,10,10,0.92)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },

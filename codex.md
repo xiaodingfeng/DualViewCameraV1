@@ -1880,6 +1880,7 @@ cd android
 - `src/components/GalleryModal.tsx`
 - `src/screens/CameraShell.tsx`
 - `src/styles/cameraStyles.ts`
+- `src/__tests__/cameraUtils.test.ts`
 - `codex.md`
 
 ### 关键实现
@@ -1965,3 +1966,51 @@ cd android
 ### 后续方向
 - Media Asset 失败策略到此收口。
 - 后续任务回到主线功能开发，不再继续扩展失败任务体系，除非后续真机验证暴露明确 bug。
+
+---
+
+## 2026-04-25 升级记录（十四）
+### 本次目标
+- 回到主线功能开发，推进 Phase 6：PiP 副画面可拖拽与布局状态持久化。
+
+### 修改文件
+- `src/types/camera.ts`
+- `src/utils/settings.ts`
+- `src/components/CameraPrimitives.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `PipAnchor`、`PipScale`、`PipLayoutConfig`、`PreviewLayoutTemplateId` 类型，为后续模板化布局预留数据结构。
+- PiP 副画面默认从右下角显示，避开顶部工具栏和底部快门区域。
+- PiP 支持拖拽，松手后按位置吸附到四个角：`top-left`、`top-right`、`bottom-left`、`bottom-right`。
+- 拖拽不会触发主副切换；未发生有效拖拽的短按仍保持主副画面切换行为。
+- PiP 布局写入持久化设置，并在启动时通过 `isPipLayoutConfig()` 校验后恢复。
+- 单元测试补充 PiP 布局配置校验，避免非法 anchor、scale 或 margin 写入后影响启动恢复。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- 继续 Phase 6 的模板化布局：先补预览模板状态与切换入口，再把 `pip`、`split-horizontal`、`split-vertical`、`stack` 约束到预览层，不改变现有保存策略。
+
+---
+
+## 2026-04-25 Bugfix 记录（PiP 拖拽与图库横滑冲突）
+### 问题
+- PiP 副画面向左拖拽时，外层根视图的左滑打开图库手势也可能被触发，导致拖拽 PiP 与进入图库列表冲突。
+
+### 修复
+- PiP 手势开始时通过 `onGestureActiveChange` 通知 `CameraShell` 暂停外层图库横滑识别。
+- PiP 手势释放或中断后恢复外层图库横滑识别。
+- 保持 PiP 短按切换主副、有效拖拽吸附四角的行为不变。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）

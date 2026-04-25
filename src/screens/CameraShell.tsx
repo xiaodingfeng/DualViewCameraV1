@@ -48,6 +48,12 @@ import { SettingsModal } from '../components/SettingsModal';
 import { DualViewMedia } from '../native/dualViewMedia';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const DEFAULT_PIP_LAYOUT: PipLayoutConfig = {
+  anchor: 'bottom-right',
+  scale: 'medium',
+  marginX: 18,
+  marginY: 228,
+};
 import { styles } from '../styles/cameraStyles';
 import type {
   AspectRatioId,
@@ -55,6 +61,7 @@ import type {
   FlashMode,
   GalleryMedia,
   LastMedia,
+  PipLayoutConfig,
   PhotoFormat,
   PhotoQuality,
   SafetyOverlayMode,
@@ -110,6 +117,7 @@ import type { DualMediaAsset } from '../types/mediaAsset';
 import {
   isAspectRatioId,
   isPhotoFormat,
+  isPipLayoutConfig,
   isPhotoQuality,
   isSafetyOverlayMode,
   isVideoCodecFormat,
@@ -146,6 +154,7 @@ function CameraShell({
   const [appliedVideoFps, setAppliedVideoFps] = useState<VideoFps>(30);
   const [appliedVideoQuality, setAppliedVideoQuality] = useState<VideoQuality>('4K');
   const [videoCodec, setVideoCodec] = useState<VideoCodecFormat>('h265');
+  const [pipLayout, setPipLayout] = useState<PipLayoutConfig>(DEFAULT_PIP_LAYOUT);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -237,6 +246,7 @@ function CameraShell({
   const isBusyRef = useRef(isBusy);
   const isRecordingRef = useRef(isRecording);
   const isZoomGestureActiveRef = useRef(false);
+  const isPipGestureActiveRef = useRef(false);
 
   useEffect(() => {
     isBusyRef.current = isBusy;
@@ -300,6 +310,7 @@ function CameraShell({
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_, gestureState) => {
           if (isZoomGestureActiveRef.current) return false;
+          if (isPipGestureActiveRef.current) return false;
           // If gallery is open and we are at the first item, capture right swipes to allow closing
           if (isGalleryOpenRef.current && galleryIndexRef.current === 0 && gestureState.dx > 40 && Math.abs(gestureState.dy) < 30) {
             return true;
@@ -308,7 +319,7 @@ function CameraShell({
         },
         onMoveShouldSetPanResponder: (_, gestureState) => {
           const { dx, dy } = gestureState;
-          if (isBusyRef.current || isRecordingRef.current || isZoomGestureActiveRef.current) return false;
+          if (isBusyRef.current || isRecordingRef.current || isZoomGestureActiveRef.current || isPipGestureActiveRef.current) return false;
 
           if (isGalleryOpenRef.current) {
             return dx > 30 && Math.abs(dy) < 40 && galleryIndexRef.current === 0;
@@ -401,6 +412,7 @@ function CameraShell({
           if (typeof settings.saveDualOutputs === 'boolean') setSaveDualOutputs(settings.saveDualOutputs);
           if (typeof settings.shutterSoundEnabled === 'boolean') setShutterSoundEnabled(settings.shutterSoundEnabled);
           if (isSafetyOverlayMode(settings.safetyOverlayMode)) setSafetyOverlayMode(settings.safetyOverlayMode);
+          if (isPipLayoutConfig(settings.pipLayout)) setPipLayout(settings.pipLayout);
         })
         .finally(() => {
           if (!cancelled) setSettingsLoaded(true);
@@ -459,8 +471,10 @@ function CameraShell({
       saveDualOutputs,
       safetyOverlayMode,
       shutterSoundEnabled,
+      pipLayout,
     }).catch(() => {});
   }, [
+    pipLayout,
     photoFormat,
     photoQuality,
     saveDualOutputs,
@@ -1779,6 +1793,11 @@ function CameraShell({
                     orientation={subDisplayOrientation}
                     onPress={swapMainAndSub}
                     overlayMode={safetyOverlayMode}
+                    layout={pipLayout}
+                    onGestureActiveChange={active => {
+                      isPipGestureActiveRef.current = active;
+                    }}
+                    onLayoutChange={setPipLayout}
                     previewOutput={
                       captureMode === 'photo'
                           ? pendingPhotoCapture
@@ -1788,6 +1807,7 @@ function CameraShell({
                               ? null
                               : pipPreviewOutput
                     }
+                    previewSize={previewSize}
                     sessionRevision={sessionRevision}
                     placeholderMode={
                       captureMode === 'photo' && pendingPhotoCapture

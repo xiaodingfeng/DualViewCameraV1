@@ -55,6 +55,7 @@ import {
 } from '../utils/mediaJobQueue';
 import {
   isAspectRatioId,
+  isPipLayoutConfig,
   isPhotoFormat,
   isSafetyOverlayMode,
   isVideoCodecFormat,
@@ -166,6 +167,9 @@ describe('settings guards', () => {
     expect(isVideoQuality('2K')).toBe(false);
     expect(isViewMode('dual')).toBe(true);
     expect(isViewMode('pip')).toBe(false);
+    expect(isPipLayoutConfig({ anchor: 'bottom-right', scale: 'medium', marginX: 18, marginY: 228 })).toBe(true);
+    expect(isPipLayoutConfig({ anchor: 'center', scale: 'medium', marginX: 18, marginY: 228 })).toBe(false);
+    expect(isPipLayoutConfig({ anchor: 'bottom-right', scale: 'medium', marginX: -1, marginY: 228 })).toBe(false);
   });
 });
 
