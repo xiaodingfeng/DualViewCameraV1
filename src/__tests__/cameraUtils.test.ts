@@ -43,6 +43,11 @@ import {
 import { ensureVideoExtension } from '../utils/gallery';
 import { buildReadyAsset, enrichGalleryMediaWithIndex } from '../utils/mediaIndex';
 import {
+  createMediaJob,
+  markStaleRunningJobs,
+  updateMediaJobInList,
+} from '../utils/mediaJobQueue';
+import {
   isAspectRatioId,
   isPhotoFormat,
   isSafetyOverlayMode,
@@ -269,5 +274,46 @@ describe('media index helpers', () => {
     expect(item.captureId).toBe('cap_1');
     expect(item.captureRole).toBe('sub');
     expect(item.captureGroupSize).toBe(1);
+  });
+});
+
+describe('media job queue helpers', () => {
+  it('creates and updates background media jobs with bounded progress', () => {
+    const job = createMediaJob({
+      captureId: 'cap_2',
+      type: 'video-variant',
+      input: { role: 'sub' },
+      now: 1000,
+    });
+
+    const [updated] = updateMediaJobInList(
+      [job],
+      job.id,
+      { status: 'running', progress: 2 },
+      1200,
+    );
+
+    expect(updated.captureId).toBe('cap_2');
+    expect(updated.status).toBe('running');
+    expect(updated.progress).toBe(1);
+    expect(updated.updatedAt).toBe(1200);
+  });
+
+  it('marks interrupted queued and running jobs as failed after reload', () => {
+    const queued = createMediaJob({
+      captureId: 'cap_3',
+      type: 'video-variant',
+      input: {},
+      now: 1000,
+    });
+    const running = { ...queued, id: 'running-job', status: 'running' as const };
+    const succeeded = { ...queued, id: 'done-job', status: 'succeeded' as const };
+
+    const recovered = markStaleRunningJobs([queued, running, succeeded], 2000);
+
+    expect(recovered[0].status).toBe('failed');
+    expect(recovered[1].status).toBe('failed');
+    expect(recovered[2].status).toBe('succeeded');
+    expect(recovered[0].errorMessage).toContain('后台任务未完成');
   });
 });

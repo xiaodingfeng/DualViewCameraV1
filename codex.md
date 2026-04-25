@@ -1698,3 +1698,79 @@ cd android
 ### 下一步
 - 继续 Phase 4：把 Gallery 改为 group-first 展示，一个 capture group 在首屏只占一个入口，进入后查看组内主图 / 副图 / 视频变体。
 - 随后进入 Phase 5：Media Job Queue，把副视频转码、照片素材包生成和失败状态从轻量 toast 升级为可追踪任务。
+
+---
+
+## 2026-04-25 升级记录（六）
+
+### 本次目标
+- 继续 Phase 4：把 Gallery 从纯媒体平铺推进为 capture group 优先展示。
+- 保持现有查看、分享、删除、详情和缩放交互可用。
+
+### 修改文件
+- `src/components/GalleryModal.tsx`
+- `src/styles/cameraStyles.ts`
+- `codex.md`
+
+### 关键实现
+- `GalleryView` 内部新增 `groupGalleryItems()`，按 `captureId` 将系统相册结果聚合为 Gallery group；没有索引的旧媒体仍按单项 group 展示。
+- 顶层横向分页现在按 capture group 计数，而不是按单个媒体计数。
+- 每个 group 内按 `main`、`sub`、`vertical`、`horizontal`、`square`、`cover`、`source` 排序。
+- 当 group 内有多项资产时，画面底部显示主画面 / 副画面 / 竖图 / 横图等切换标签，当前页内可查看该组不同资产。
+- Gallery 详情继续显示 `captureId`、角色和组内资产数量。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+- [ ] 真机双画面拍照后 Gallery 只出现一个 capture group（待设备验证）
+- [ ] group 内切换主图 / 副图（待设备验证）
+
+### 已知问题
+- group 内资产切换目前使用底部标签点击，不是嵌套横向手势；避免与顶层 group 横滑分页冲突。后续若要组内也支持横滑，需要改为双层导航或进入 group detail 页面。
+- 删除当前仍删除单个 asset，没有同步清理本地索引；后续需要在 Media Index 阶段补齐删除后的索引维护。
+
+### 下一步
+- 进入 Phase 5：Media Job Queue，先把副视频转码任务纳入队列状态模型，再逐步把照片素材包生成接入队列。
+
+---
+
+## 2026-04-25 升级记录（七）
+### 本次目标
+- 继续 Phase 5：建立 `MediaJobQueue` 最小闭环。
+- 先把双画面录像的副画面后台生成纳入可追踪任务状态，保留主视频立即入库的现有可靠路径。
+- 补充协作约束：后续不再自动执行 git commit，提交由用户确认后再做。
+
+### 修改文件
+- `src/types/mediaJob.ts`
+- `src/utils/mediaJobQueue.ts`
+- `src/components/MediaJobIndicator.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `MediaJob` 类型，覆盖 `queued`、`running`、`succeeded`、`failed`、`cancelled` 状态，以及进度、输入、输出、错误信息和重试次数。
+- 新增 `media-jobs.json` 持久化工具，路径为 `DocumentDirectoryPath/DualViewCamera/media-jobs.json`；JSON 损坏时会备份为 `media-jobs.broken.{timestamp}.json` 后重建。
+- App 启动时会加载历史任务；若发现上次退出前仍处于 `queued` 或 `running`，会标记为失败，避免界面长期显示悬挂任务。
+- 双画面录像停止后，主视频仍按原路径立即保存并写入 Media Asset Index；副画面视频后台生成时会登记 `video-variant` 任务，并更新为运行、成功或失败。
+- 新增 `MediaJobIndicator` 前台小状态条，展示副画面视频后台生成进度；当前原生转码链路没有真实进度回调，因此先使用关键阶段进度点。
+- 新增单元测试覆盖任务创建、进度裁剪和重启后中断任务恢复为失败。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- `MediaJobQueue` 目前先承担持久化状态追踪，尚未把任务执行器完全抽象为统一串行队列；副画面视频仍由现有后台 async 路径执行。
+- 副画面视频转码没有真实百分比回调，状态条进度为阶段性估算。
+- 失败任务当前只展示短时间失败提示，尚未提供 UI 层重试/取消入口。
+
+### 下一步
+- 将副画面视频后台生成从内联 async 进一步迁移为真正的 `MediaJobQueue` 串行执行任务。
+- 接入照片素材包生成任务，并把失败状态同步回 Gallery 分组内的对应 asset。
+
+### 修复记录
+- 修复 `MediaJobIndicator` 完成态不会自动消失的问题：组件现在会在完成/失败态启动轻量定时刷新，让 `isVisibleMediaJob()` 的过期时间能够生效。

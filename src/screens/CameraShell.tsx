@@ -43,6 +43,7 @@ import {
   ZoomSelector,
 } from '../components/CameraPrimitives';
 import { GalleryView } from '../components/GalleryModal';
+import { MediaJobIndicator } from '../components/MediaJobIndicator';
 import { SettingsModal } from '../components/SettingsModal';
 import { DualViewMedia } from '../native/dualViewMedia';
 
@@ -92,6 +93,17 @@ import {
   buildReadyAsset,
   upsertCaptureGroup,
 } from '../utils/mediaIndex';
+import type { MediaJob } from '../types/mediaJob';
+import {
+  createMediaJob,
+  loadMediaJobs,
+  markStaleRunningJobs,
+  saveMediaJobs,
+  updateMediaJob,
+  updateMediaJobInList,
+  upsertMediaJob,
+  upsertMediaJobInList,
+} from '../utils/mediaJobQueue';
 import type { DualMediaAsset } from '../types/mediaAsset';
 import {
   isAspectRatioId,
@@ -200,6 +212,7 @@ function CameraShell({
   const [galleryItems, setGalleryItems] = useState<GalleryMedia[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
+  const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isVideoSessionTarget, setIsVideoSessionTarget] = useState(false);
@@ -230,6 +243,24 @@ function CameraShell({
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadMediaJobs()
+      .then(jobs => {
+        const recoveredJobs = markStaleRunningJobs(jobs);
+        if (!cancelled) {
+          setMediaJobs(recoveredJobs);
+        }
+        if (recoveredJobs.some((job, index) => job !== jobs[index])) {
+          saveMediaJobs(recoveredJobs).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refreshGallery = useCallback(async () => {
     const items = await loadDualViewGallery();
@@ -1102,8 +1133,30 @@ function CameraShell({
 
           if (viewMode === 'dual' && saveDualOutputs) {
             void (async () => {
+              const job = createMediaJob({
+                captureId,
+                type: 'video-variant',
+                input: {
+                  sourceUri: filePath,
+                  role: 'sub',
+                  codec: videoCodec,
+                  aspect: selectedAspectId,
+                },
+              });
+              const applyJobPatch = async (
+                  patch: Partial<Omit<MediaJob, 'id' | 'captureId' | 'type' | 'createdAt'>>,
+              ) => {
+                setMediaJobs(previous => updateMediaJobInList(previous, job.id, patch));
+                const jobs = await updateMediaJob(job.id, patch);
+                setMediaJobs(jobs);
+              };
+
               try {
+                setMediaJobs(previous => upsertMediaJobInList(previous, job));
+                await upsertMediaJob(job);
+                await applyJobPatch({ status: 'running', progress: 0.08 });
                 const subVariant = saveSubFrameSpec.variant;
+                await applyJobPatch({ status: 'running', progress: 0.35 });
                 const subPath = await createVideoVariant(
                     filePath,
                     subVariant,
@@ -1113,6 +1166,7 @@ function CameraShell({
                     false,
                     shouldRotateSubLandscapeFallback,
                 );
+                await applyJobPatch({ status: 'running', progress: 0.72 });
                 const subSaved = await saveToGallery(subPath, 'video', '副画面');
                 await saveCaptureGroupToIndex({
                   captureId,
@@ -1131,7 +1185,19 @@ function CameraShell({
                   ],
                 });
                 setToast('副画面视频已保存');
-              } catch {
+                await applyJobPatch({
+                  status: 'succeeded',
+                  progress: 1,
+                  output: {
+                    uri: subSaved.uri,
+                    localPath: subSaved.localPath,
+                  },
+                });
+              } catch (error) {
+                await applyJobPatch({
+                  status: 'failed',
+                  errorMessage: cameraErrorMessage(error, '副画面视频后台处理失败'),
+                }).catch(() => {});
                 setToast('副画面视频后台处理失败，已保留主画面视频');
               }
             })();
@@ -1147,6 +1213,7 @@ function CameraShell({
         saveSubFrameSpec,
         selectedAspectId,
         shouldRotateSubLandscapeFallback,
+        setMediaJobs,
         videoCodec,
         videoFrameSize,
         viewMode,
@@ -1438,6 +1505,7 @@ function CameraShell({
             )}
 
             {toast ? <Toast message={toast} /> : null}
+            <MediaJobIndicator jobs={mediaJobs} />
 
             <View style={styles.zoomBarContainer} pointerEvents="box-none">
               <ZoomSelector

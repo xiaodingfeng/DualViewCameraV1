@@ -27,6 +27,12 @@ import {
 } from '../utils/camera';
 import { mimeTypeForMedia } from '../utils/gallery';
 
+type GalleryMediaGroup = {
+  id: string;
+  createdAt: number;
+  items: GalleryMedia[];
+};
+
 export function GalleryView({
   index,
   items,
@@ -42,12 +48,18 @@ export function GalleryView({
   onIndexChange: (index: number) => void;
   translateX: Animated.AnimatedInterpolation<number>;
 }) {
-  const listRef = useRef<FlatList<GalleryMedia> | null>(null);
+  const listRef = useRef<FlatList<GalleryMediaGroup> | null>(null);
   const [viewerWidth, setViewerWidth] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(() => new Set());
   const [zoomLocked, setZoomLocked] = useState(false);
-  const current = items[index] ?? null;
+  const [assetIndexByGroup, setAssetIndexByGroup] = useState<Record<string, number>>({});
+  const groups = useMemo(() => groupGalleryItems(items), [items]);
+  const currentGroup = groups[index] ?? null;
+  const currentAssetIndex = currentGroup
+    ? Math.min(assetIndexByGroup[currentGroup.id] ?? 0, currentGroup.items.length - 1)
+    : 0;
+  const current = currentGroup?.items[currentAssetIndex] ?? null;
 
   useEffect(() => {
     if (viewerWidth <= 0) return;
@@ -61,10 +73,16 @@ export function GalleryView({
     setFailedPreviewIds(new Set());
     setZoomLocked(false);
     // Force scroll to index 0 (latest) when items change or component mounts
-    if (items.length > 0 && viewerWidth > 0) {
+    if (groups.length > 0 && viewerWidth > 0) {
       listRef.current?.scrollToIndex({ index: 0, animated: false });
     }
-  }, [items.length, viewerWidth]);
+  }, [groups.length, viewerWidth]);
+
+  useEffect(() => {
+    if (index >= groups.length && groups.length > 0) {
+      onIndexChange(groups.length - 1);
+    }
+  }, [groups.length, index, onIndexChange]);
 
   const shareCurrent = useCallback(async () => {
     if (current == null) return;
@@ -97,26 +115,33 @@ export function GalleryView({
     >
       <View style={styles.galleryTopBar}>
         <Text style={styles.galleryCount}>
-          {items.length > 0
-            ? `${index + 1}/${items.length}${current?.captureRole ? ` · ${roleLabel(current.captureRole)}` : ''}`
+          {groups.length > 0
+            ? `${index + 1}/${groups.length}${current?.captureRole ? ` · ${roleLabel(current.captureRole)}` : ''}`
             : '0/0'}
         </Text>
       </View>
 
-      {viewerWidth > 0 && items.length > 0 ? (
+      {viewerWidth > 0 && groups.length > 0 ? (
         <FlatList
           ref={listRef}
-          data={items}
+          data={groups}
           horizontal
           initialNumToRender={3}
-          keyExtractor={item => item.id}
+          keyExtractor={group => group.id}
           maxToRenderPerBatch={3}
           pagingEnabled
           removeClippedSubviews
           scrollEnabled={!zoomLocked}
-          renderItem={({ item, index: itemIndex }) => (
+          renderItem={({ item: group, index: groupIndex }) => {
+            const groupAssetIndex = Math.min(
+              assetIndexByGroup[group.id] ?? 0,
+              group.items.length - 1,
+            );
+            const item = group.items[groupAssetIndex];
+
+            return (
             <View style={[styles.galleryPage, { width: viewerWidth }]}>
-              {Math.abs(itemIndex - index) > 2 ? (
+              {Math.abs(groupIndex - index) > 2 ? (
                 <View style={styles.galleryLazyPage} />
               ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
                 <ZoomablePhoto
@@ -128,15 +153,46 @@ export function GalleryView({
                       return next;
                     })
                   }
-                  onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined}
+                  onZoomActiveChange={groupIndex === index ? setZoomLocked : undefined}
                 />
               ) : item.type === 'video' ? (
-                <InlineVideoPlayer item={item} onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined} />
+                <InlineVideoPlayer item={item} onZoomActiveChange={groupIndex === index ? setZoomLocked : undefined} />
               ) : (
                 <MediaPreviewFallback item={item} />
               )}
+              {group.items.length > 1 ? (
+                <View style={styles.galleryAssetStrip}>
+                  {group.items.map((asset, assetIndex) => (
+                    <Pressable
+                      key={asset.id}
+                      style={[
+                        styles.galleryAssetChip,
+                        assetIndex === groupAssetIndex && styles.galleryAssetChipActive,
+                      ]}
+                      onPress={() => {
+                        setAssetIndexByGroup(previous => ({
+                          ...previous,
+                          [group.id]: assetIndex,
+                        }));
+                        setDetailsOpen(false);
+                        setZoomLocked(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.galleryAssetChipText,
+                          assetIndex === groupAssetIndex && styles.galleryAssetChipTextActive,
+                        ]}
+                      >
+                        {roleLabel(asset.captureRole)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
             </View>
-          )}
+          );
+          }}
           showsHorizontalScrollIndicator={false}
           windowSize={5}
           getItemLayout={(_, itemIndex) => ({
@@ -146,7 +202,7 @@ export function GalleryView({
           })}
           onMomentumScrollEnd={event => {
             const nextIndex = Math.round(event.nativeEvent.contentOffset.x / viewerWidth);
-            onIndexChange(clamp(nextIndex, 0, items.length - 1));
+            onIndexChange(clamp(nextIndex, 0, groups.length - 1));
             setZoomLocked(false);
           }}
           onScrollToIndexFailed={info => {
@@ -439,6 +495,46 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
       </Text>
     </View>
   );
+}
+
+function groupGalleryItems(items: GalleryMedia[]): GalleryMediaGroup[] {
+  const groups = new Map<string, GalleryMediaGroup>();
+
+  items.forEach(item => {
+    const id = item.captureId ?? item.id;
+    const existing = groups.get(id);
+    if (existing) {
+      existing.items.push(item);
+      existing.createdAt = Math.max(existing.createdAt, item.captureGroupCreatedAt ?? item.timestamp);
+      return;
+    }
+
+    groups.set(id, {
+      id,
+      createdAt: item.captureGroupCreatedAt ?? item.timestamp,
+      items: [item],
+    });
+  });
+
+  return Array.from(groups.values())
+    .map(group => ({
+      ...group,
+      items: group.items.sort((a, b) => roleOrder(a.captureRole) - roleOrder(b.captureRole)),
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function roleOrder(role?: GalleryMedia['captureRole']): number {
+  const order: Array<NonNullable<GalleryMedia['captureRole']>> = [
+    'main',
+    'sub',
+    'vertical',
+    'horizontal',
+    'square',
+    'cover',
+    'source',
+  ];
+  return role == null ? order.length : order.indexOf(role);
 }
 
 function roleLabel(role?: GalleryMedia['captureRole']): string {
