@@ -1805,3 +1805,33 @@ cd android
 ### 下一步
 - 将照片素材包生成接入 `MediaJobQueue`。
 - 为 Gallery 分组补充失败 asset 状态展示和后续重试入口。
+
+---
+
+## 2026-04-25 升级记录（九）
+### 本次目标
+- 继续 Phase 5：将照片后台处理接入 `MediaJobQueue`。
+- 遵守新协作规则：新功能不自动提交；只有明确 fixbug 时才自动提交。
+
+### 修改文件
+- `src/screens/CameraShell.tsx`
+- `codex.md`
+
+### 关键实现
+- 单画面照片后台处理登记为 `photo-variant` 任务。
+- 双画面照片主/副图生成登记为 `photo-pack` 任务。
+- 照片裁剪、双图生成、相册入库和 Media Asset Index 写入现在通过 `runQueuedMediaJob()` 串行执行，避免与副画面视频转码任务并发争抢媒体处理资源。
+- 保持拍照快门路径不等待后处理，捕获完成后 UI 仍会恢复；失败时写入任务失败状态并保留原有 toast 提示。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- 照片任务进度仍是阶段性估算，不是原生处理的真实百分比。
+- Gallery 目前还没有把失败任务转成组内失败 asset 显示，也没有重试入口。
+
+### 下一步
+- 为 Gallery 分组补充失败 asset 状态展示。
+- 设计任务失败后的重试入口，优先覆盖副画面视频和照片素材包。

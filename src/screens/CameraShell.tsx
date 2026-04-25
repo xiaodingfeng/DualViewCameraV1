@@ -931,9 +931,30 @@ function CameraShell({
       ) => {
         const captureId = createCaptureId();
         const createdAt = Date.now();
+        const job = createMediaJob({
+          captureId,
+          type: options.dual ? 'photo-pack' : 'photo-variant',
+          input: {
+            sourceUri: filePath,
+            aspect: selectedAspectId,
+            format: options.format,
+            dual: options.dual,
+          },
+        });
+        const applyJobPatch = async (
+            patch: Partial<Omit<MediaJob, 'id' | 'captureId' | 'type' | 'createdAt'>>,
+        ) => {
+          setMediaJobs(previous => updateMediaJobInList(previous, job.id, patch));
+          const jobs = await updateMediaJob(job.id, patch);
+          setMediaJobs(jobs);
+        };
         void (async () => {
           try {
-            if (options.dual) {
+            setMediaJobs(previous => upsertMediaJobInList(previous, job));
+            await upsertMediaJob(job);
+            await runQueuedMediaJob(async () => {
+              await applyJobPatch({ status: 'running', progress: 0.08 });
+              if (options.dual) {
               const { mainPath, subPath } = await createDualPhotoVariantsForAspects(
                   filePath,
                   options.mainSpec,
@@ -943,11 +964,13 @@ function CameraShell({
                   options.mirror,
                   options.rotateLandscapeFallback,
               );
+              await applyJobPatch({ status: 'running', progress: 0.45 });
 
               const [mainSaved, subSaved] = await Promise.all([
                 saveToGallery(mainPath, 'photo', '主画面'),
                 saveToGallery(subPath, 'photo', '副画面'),
               ]);
+              await applyJobPatch({ status: 'running', progress: 0.78 });
               await saveCaptureGroupToIndex({
                 captureId,
                 createdAt,
@@ -974,6 +997,14 @@ function CameraShell({
                   }),
                 ],
               });
+              await applyJobPatch({
+                status: 'succeeded',
+                progress: 1,
+                output: {
+                  mainUri: mainSaved.uri,
+                  subUri: subSaved.uri,
+                },
+              });
             } else {
               const mainPath = await createPhotoVariantForAspect(
                   filePath,
@@ -984,6 +1015,8 @@ function CameraShell({
                   options.mirror,
                   options.rotateLandscapeFallback.main,
               );
+              await applyJobPatch({ status: 'running', progress: 0.55 });
+              await applyJobPatch({ status: 'running', progress: 0.82 });
               const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
               await saveCaptureGroupToIndex({
                 captureId,
@@ -1001,13 +1034,26 @@ function CameraShell({
                   }),
                 ],
               });
+              await applyJobPatch({
+                status: 'succeeded',
+                progress: 1,
+                output: {
+                  uri: mainSaved.uri,
+                  localPath: mainSaved.localPath,
+                },
+              });
             }
+            });
           } catch (error) {
+            await applyJobPatch({
+              status: 'failed',
+              errorMessage: cameraErrorMessage(error, '鐓х墖淇濆瓨澶辫触'),
+            }).catch(() => {});
             setToast(cameraErrorMessage(error, '照片保存失败'));
           }
         })();
       },
-      [saveCaptureGroupToIndex, saveToGallery, selectedAspectId],
+      [saveCaptureGroupToIndex, saveToGallery, selectedAspectId, setMediaJobs],
   );
 
   const prepareFlashForPhoto = useCallback(async () => {
