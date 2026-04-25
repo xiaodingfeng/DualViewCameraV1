@@ -14,6 +14,7 @@ import type {
   FlashMode,
   PhotoFormat,
   PhotoQuality,
+  PreviewLayoutTemplateId,
   SafetyOverlayMode,
   VideoCodecFormat,
   VideoFps,
@@ -40,6 +41,8 @@ function SettingsModal({
   saveDualOutputs,
   safetyOverlayMode,
   onSafetyOverlayModeChange,
+  previewLayoutTemplate,
+  onPreviewLayoutTemplateChange,
   setSaveDualOutputs,
   shutterSoundEnabled,
   onShutterSoundEnabledChange,
@@ -66,6 +69,8 @@ function SettingsModal({
   saveDualOutputs: boolean;
   safetyOverlayMode: SafetyOverlayMode;
   onSafetyOverlayModeChange: (value: SafetyOverlayMode) => void;
+  previewLayoutTemplate: PreviewLayoutTemplateId;
+  onPreviewLayoutTemplateChange: (value: PreviewLayoutTemplateId) => void;
   setSaveDualOutputs: (value: boolean) => void;
   shutterSoundEnabled: boolean;
   onShutterSoundEnabledChange: (value: boolean) => void;
@@ -228,6 +233,14 @@ function SettingsModal({
               <SettingsSection title="双画面">
                 <Chip active={viewMode === 'dual'} label="双画面预览已开启" />
                 <Chip active={saveDualOutputs} label="双画面同时保存" onPress={() => setSaveDualOutputs(!saveDualOutputs)} />
+                {PREVIEW_LAYOUT_TEMPLATES.map(item => (
+                  <Chip
+                    key={item.id}
+                    active={previewLayoutTemplate === item.id}
+                    label={item.label}
+                    onPress={() => onPreviewLayoutTemplateChange(item.id)}
+                  />
+                ))}
               </SettingsSection>
             )}
             
@@ -279,6 +292,13 @@ const SAFETY_OVERLAY_LABELS: Record<SafetyOverlayMode, string> = {
   subtle: '轻量',
   strong: '明显',
 };
+
+const PREVIEW_LAYOUT_TEMPLATES: Array<{ id: PreviewLayoutTemplateId; label: string }> = [
+  { id: 'pip', label: '画中画' },
+  { id: 'split-horizontal', label: '左右分屏' },
+  { id: 'split-vertical', label: '上下分屏' },
+  { id: 'stack', label: '主图+副条' },
+];
 
 function RoundButton({ active = false, label, onPress, style, children }: { active?: boolean; label: string; onPress: () => void; style?: any; children?: React.ReactNode }) {
   return <Pressable style={[styles.roundButton, active && styles.roundButtonActive, style]} onPress={onPress}>{children ? children : <Text style={styles.roundButtonText}>{label}</Text>}</Pressable>;

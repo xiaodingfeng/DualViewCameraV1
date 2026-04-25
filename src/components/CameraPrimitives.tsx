@@ -8,6 +8,8 @@ import {
   StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { NativePreviewView } from 'react-native-vision-camera';
 
@@ -28,6 +30,7 @@ import type {
   LastMedia,
   PipAnchor,
   PipLayoutConfig,
+  PreviewLayoutTemplateId,
   SafetyOverlayMode,
   VideoFps,
   VideoQuality,
@@ -232,6 +235,128 @@ export function BottomControls({
           <Text style={[styles.viewModeText, viewMode === 'dual' && styles.viewModeTextActive, isRecording && styles.viewModeTextDisabled]}>双画面</Text>
         </Pressable>
       </View>
+    </View>
+  );
+}
+
+function TemplatePreviewPane({
+  cropSpec,
+  hybridRef,
+  isRecording,
+  overlayMode,
+  previewOutput,
+  role,
+  sessionRevision,
+  style,
+}: {
+  cropSpec: CropSpec;
+  hybridRef?: unknown;
+  isRecording: boolean;
+  overlayMode: SafetyOverlayMode;
+  previewOutput: any | null;
+  role: 'main' | 'sub';
+  sessionRevision: number;
+  style: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.templatePane, style]}>
+      {previewOutput ? (
+        <NativePreviewView
+          key={`${role}-template-${sessionRevision}`}
+          style={StyleSheet.absoluteFill}
+          previewOutput={previewOutput}
+          resizeMode="cover"
+          implementationMode="compatible"
+          hybridRef={hybridRef as never}
+        />
+      ) : (
+        <View style={styles.pipPlaceholder}>
+          <Text style={styles.pipPlaceholderText}>{role === 'main' ? '主画面' : '副画面'}</Text>
+        </View>
+      )}
+      <CompositionOverlay crop={cropSpec} isRecording={isRecording} mode={overlayMode} role={role} />
+    </View>
+  );
+}
+
+export function TemplateDualPreview({
+  layoutId,
+  mainCropSpec,
+  mainHybridRef,
+  mainPreviewOutput,
+  overlayMode,
+  subCropSpec,
+  subPreviewOutput,
+  isRecording,
+  sessionRevision,
+}: {
+  layoutId: Exclude<PreviewLayoutTemplateId, 'pip'>;
+  mainCropSpec: CropSpec;
+  mainHybridRef: unknown;
+  mainPreviewOutput: any | null;
+  overlayMode: SafetyOverlayMode;
+  subCropSpec: CropSpec;
+  subPreviewOutput: any | null;
+  isRecording: boolean;
+  sessionRevision: number;
+}) {
+  const isHorizontal = layoutId === 'split-horizontal';
+  const isVertical = layoutId === 'split-vertical';
+
+  if (layoutId === 'stack') {
+    return (
+      <View pointerEvents="none" style={styles.templateLayer}>
+        <TemplatePreviewPane
+          cropSpec={mainCropSpec}
+          hybridRef={mainHybridRef}
+          isRecording={isRecording}
+          overlayMode={overlayMode}
+          previewOutput={mainPreviewOutput}
+          role="main"
+          sessionRevision={sessionRevision}
+          style={styles.stackMainPane}
+        />
+        <TemplatePreviewPane
+          cropSpec={subCropSpec}
+          isRecording={isRecording}
+          overlayMode={overlayMode}
+          previewOutput={subPreviewOutput}
+          role="sub"
+          sessionRevision={sessionRevision}
+          style={styles.stackSubPane}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.templateLayer,
+        isHorizontal && styles.templateSplitHorizontal,
+        isVertical && styles.templateSplitVertical,
+      ]}
+    >
+      <TemplatePreviewPane
+        cropSpec={mainCropSpec}
+        hybridRef={mainHybridRef}
+        isRecording={isRecording}
+        overlayMode={overlayMode}
+        previewOutput={mainPreviewOutput}
+        role="main"
+        sessionRevision={sessionRevision}
+        style={styles.templateSplitPane}
+      />
+      <TemplatePreviewPane
+        cropSpec={subCropSpec}
+        isRecording={isRecording}
+        overlayMode={overlayMode}
+        previewOutput={subPreviewOutput}
+        role="sub"
+        sessionRevision={sessionRevision}
+        style={styles.templateSplitPane}
+      />
     </View>
   );
 }

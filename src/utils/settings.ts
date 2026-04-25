@@ -7,6 +7,7 @@ import type {
   PipAnchor,
   PipLayoutConfig,
   PipScale,
+  PreviewLayoutTemplateId,
   PhotoFormat,
   PhotoQuality,
   SafetyOverlayMode,
@@ -68,6 +69,10 @@ export function isPipAnchor(value: unknown): value is PipAnchor {
 
 export function isPipScale(value: unknown): value is PipScale {
   return value === 'small' || value === 'medium' || value === 'large';
+}
+
+export function isPreviewLayoutTemplateId(value: unknown): value is PreviewLayoutTemplateId {
+  return value === 'pip' || value === 'split-horizontal' || value === 'split-vertical' || value === 'stack';
 }
 
 export function isPipLayoutConfig(value: unknown): value is PipLayoutConfig {

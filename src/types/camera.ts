@@ -54,6 +54,7 @@ export type PersistedSettings = Partial<{
   shutterSoundEnabled: boolean;
   safetyOverlayMode: SafetyOverlayMode;
   pipLayout: PipLayoutConfig;
+  previewLayoutTemplate: PreviewLayoutTemplateId;
 }>;
 
 export type NativeVideoViewProps = ViewProps & { sourceUri: string };

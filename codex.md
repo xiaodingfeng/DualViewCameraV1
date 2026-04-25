@@ -1862,6 +1862,40 @@ cd android
 - [x] UTF-8 文本扫描无 mojibake 模式残留
 - [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
 
+---
+
+## 2026-04-25 升级记录（十五）
+### 本次目标
+- 继续 Phase 6：补齐第一批双画面预览布局模板切换入口。
+
+### 修改文件
+- `src/types/camera.ts`
+- `src/utils/settings.ts`
+- `src/components/CameraPrimitives.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `previewLayoutTemplate` 持久化设置，支持 `pip`、`split-horizontal`、`split-vertical`、`stack`。
+- 设置页“双画面”分组新增布局选择 Chip：画中画、左右分屏、上下分屏、主图+副条。
+- 双画面预览层新增 `TemplateDualPreview`，在非 PiP 模板下用两个原生预览 Surface 展示主/副画面。
+- 模板布局仅影响预览展示；拍照和录像仍沿用主/副独立输出，不做合成图片或合成视频。
+- 模板模式下主预览继续传入 `hybridRef`，保留对焦测光路径。
+- 单元测试补充布局模板 ID 校验，避免非法模板配置写入后影响启动恢复。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- 真机验证四种布局下的预览显示、对焦、拍照和录像主链路。
+- 后续再考虑为模板增加更明确的小图标预览；当前先用文字 Chip 降低改动风险。
+
 ### 已知问题
 - Gallery 目前只展示失败状态，还没有重试/取消按钮。
 - 失败任务仍依赖 `MediaJob` 记录，尚未写回 Media Asset Index 成为持久失败 asset。

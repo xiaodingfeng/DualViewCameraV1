@@ -56,6 +56,7 @@ import {
 import {
   isAspectRatioId,
   isPipLayoutConfig,
+  isPreviewLayoutTemplateId,
   isPhotoFormat,
   isSafetyOverlayMode,
   isVideoCodecFormat,
@@ -170,6 +171,8 @@ describe('settings guards', () => {
     expect(isPipLayoutConfig({ anchor: 'bottom-right', scale: 'medium', marginX: 18, marginY: 228 })).toBe(true);
     expect(isPipLayoutConfig({ anchor: 'center', scale: 'medium', marginX: 18, marginY: 228 })).toBe(false);
     expect(isPipLayoutConfig({ anchor: 'bottom-right', scale: 'medium', marginX: -1, marginY: 228 })).toBe(false);
+    expect(isPreviewLayoutTemplateId('split-horizontal')).toBe(true);
+    expect(isPreviewLayoutTemplateId('grid')).toBe(false);
   });
 });
 

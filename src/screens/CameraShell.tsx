@@ -38,6 +38,7 @@ import {
   MainPreview,
   PipPreview,
   PreviewStatusOverlay,
+  TemplateDualPreview,
   Toast,
   TopBar,
   ZoomSelector,
@@ -54,6 +55,7 @@ const DEFAULT_PIP_LAYOUT: PipLayoutConfig = {
   marginX: 18,
   marginY: 228,
 };
+const DEFAULT_PREVIEW_LAYOUT_TEMPLATE: PreviewLayoutTemplateId = 'pip';
 import { styles } from '../styles/cameraStyles';
 import type {
   AspectRatioId,
@@ -64,6 +66,7 @@ import type {
   PipLayoutConfig,
   PhotoFormat,
   PhotoQuality,
+  PreviewLayoutTemplateId,
   SafetyOverlayMode,
   VideoCodecFormat,
   VideoFps,
@@ -118,6 +121,7 @@ import {
   isAspectRatioId,
   isPhotoFormat,
   isPipLayoutConfig,
+  isPreviewLayoutTemplateId,
   isPhotoQuality,
   isSafetyOverlayMode,
   isVideoCodecFormat,
@@ -155,6 +159,9 @@ function CameraShell({
   const [appliedVideoQuality, setAppliedVideoQuality] = useState<VideoQuality>('4K');
   const [videoCodec, setVideoCodec] = useState<VideoCodecFormat>('h265');
   const [pipLayout, setPipLayout] = useState<PipLayoutConfig>(DEFAULT_PIP_LAYOUT);
+  const [previewLayoutTemplate, setPreviewLayoutTemplate] = useState<PreviewLayoutTemplateId>(
+    DEFAULT_PREVIEW_LAYOUT_TEMPLATE,
+  );
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -413,6 +420,9 @@ function CameraShell({
           if (typeof settings.shutterSoundEnabled === 'boolean') setShutterSoundEnabled(settings.shutterSoundEnabled);
           if (isSafetyOverlayMode(settings.safetyOverlayMode)) setSafetyOverlayMode(settings.safetyOverlayMode);
           if (isPipLayoutConfig(settings.pipLayout)) setPipLayout(settings.pipLayout);
+          if (isPreviewLayoutTemplateId(settings.previewLayoutTemplate)) {
+            setPreviewLayoutTemplate(settings.previewLayoutTemplate);
+          }
         })
         .finally(() => {
           if (!cancelled) setSettingsLoaded(true);
@@ -472,6 +482,7 @@ function CameraShell({
       safetyOverlayMode,
       shutterSoundEnabled,
       pipLayout,
+      previewLayoutTemplate,
     }).catch(() => {});
   }, [
     pipLayout,
@@ -482,6 +493,7 @@ function CameraShell({
     selectedAspectId,
     settingsLoaded,
     shutterSoundEnabled,
+    previewLayoutTemplate,
     videoCodec,
     videoFps,
     videoQuality,
@@ -1744,24 +1756,46 @@ function CameraShell({
                 lastPinchDist.current = null;
               }}
           >
-            <MainPreview
-                hybridRef={previewHybridRef}
-                cropSpec={mainFrameSpec}
-                orientation={mainDisplayOrientation}
-                aspectRatio={mainPreviewAspect}
-                frame={mainPreviewFrame}
-                isRecording={isRecording}
-                overlayMode={safetyOverlayMode}
-                bottomOffset={mainPreviewBottomOffset}
-                topOffset={previewTopOffset}
-                fillScreen={isFullPreview}
-                previewOutput={mainPreviewOutput}
-                sessionRevision={sessionRevision}
-                isTransitioning={
-                    !isCameraReady ||
-                    isSwitching
-                }
-            />
+            {viewMode === 'dual' && previewLayoutTemplate !== 'pip' ? (
+                <TemplateDualPreview
+                    layoutId={previewLayoutTemplate}
+                    mainCropSpec={mainFrameSpec}
+                    mainHybridRef={previewHybridRef}
+                    mainPreviewOutput={mainPreviewOutput}
+                    overlayMode={safetyOverlayMode}
+                    subCropSpec={subFrameSpec}
+                    subPreviewOutput={
+                      captureMode === 'photo'
+                          ? pendingPhotoCapture
+                              ? null
+                              : pipPreviewOutput
+                          : isVideoSessionTarget
+                              ? null
+                              : pipPreviewOutput
+                    }
+                    isRecording={isRecording}
+                    sessionRevision={sessionRevision}
+                />
+            ) : (
+                <MainPreview
+                    hybridRef={previewHybridRef}
+                    cropSpec={mainFrameSpec}
+                    orientation={mainDisplayOrientation}
+                    aspectRatio={mainPreviewAspect}
+                    frame={mainPreviewFrame}
+                    isRecording={isRecording}
+                    overlayMode={safetyOverlayMode}
+                    bottomOffset={mainPreviewBottomOffset}
+                    topOffset={previewTopOffset}
+                    fillScreen={isFullPreview}
+                    previewOutput={mainPreviewOutput}
+                    sessionRevision={sessionRevision}
+                    isTransitioning={
+                        !isCameraReady ||
+                        isSwitching
+                    }
+                />
+            )}
 
             <Pressable style={styles.focusLayer} onPress={focusAtPoint} />
             {focusPoint && <FocusBox point={focusPoint} />}
@@ -1784,7 +1818,7 @@ function CameraShell({
                 videoQuality={videoQuality}
             />
 
-            {viewMode === 'dual' && (
+            {viewMode === 'dual' && previewLayoutTemplate === 'pip' && (
                 <PipPreview
                     aspectRatio={subFrameSpec.aspect}
                     cropSpec={subFrameSpec}
@@ -1877,6 +1911,8 @@ function CameraShell({
             saveDualOutputs={saveDualOutputs}
             safetyOverlayMode={safetyOverlayMode}
             onSafetyOverlayModeChange={setSafetyOverlayMode}
+            previewLayoutTemplate={previewLayoutTemplate}
+            onPreviewLayoutTemplateChange={setPreviewLayoutTemplate}
             setSaveDualOutputs={setSaveDualOutputs}
             shutterSoundEnabled={shutterSoundEnabled}
             onShutterSoundEnabledChange={setShutterSoundEnabled}
