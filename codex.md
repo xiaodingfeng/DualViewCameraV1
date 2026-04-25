@@ -1869,3 +1869,35 @@ cd android
 ### 下一步
 - 为失败任务增加重试入口。
 - 评估是否需要将失败 asset 写入 Media Asset Index，以便任务历史和 Gallery 分组长期一致。
+
+---
+
+## 2026-04-25 升级记录（十一）
+### 本次目标
+- 继续 Phase 5：为 Gallery 中的失败任务增加重试入口。
+
+### 修改文件
+- `src/components/GalleryModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `codex.md`
+
+### 关键实现
+- Gallery 失败提示条和失败占位页增加“重试”按钮。
+- `GalleryView` 新增 `onRetryMediaJob` 回调，由 `CameraShell` 负责按任务类型执行重试。
+- 新建任务时补充可重试参数：照片任务记录构图、格式、质量、镜像和旋转 fallback；副视频任务记录构图变体、目标尺寸、编码和旋转 fallback。
+- 重试时复用 `runQueuedMediaJob()`，仍保证媒体后处理串行执行。
+- 支持重试 `video-variant`、`photo-pack`、`photo-variant`；缺少历史参数的旧任务会给出明确失败提示。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- 重试入口依赖 `MediaJob.input` 中记录的源文件和构图参数；接入前产生的旧失败任务可能缺少参数，只能提示无法重试。
+- 失败 asset 尚未写入 Media Asset Index，Gallery 的失败分组仍来自 `media-jobs.json`。
+
+### 下一步
+- 评估并实现失败 asset 写入 Media Asset Index，使 Gallery 分组和任务历史长期一致。

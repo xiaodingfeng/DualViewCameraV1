@@ -939,6 +939,11 @@ function CameraShell({
             aspect: selectedAspectId,
             format: options.format,
             dual: options.dual,
+            mainSpec: options.mainSpec,
+            subSpec: options.subSpec,
+            quality: options.quality,
+            mirror: options.mirror,
+            rotateLandscapeFallback: options.rotateLandscapeFallback,
           },
         });
         const applyJobPatch = async (
@@ -1188,6 +1193,9 @@ function CameraShell({
                   role: 'sub',
                   codec: videoCodec,
                   aspect: selectedAspectId,
+                  variant: saveSubFrameSpec.variant,
+                  targetSize: videoFrameSize(saveSubFrameSpec),
+                  rotateLandscapeFallback: shouldRotateSubLandscapeFallback,
                 },
               });
               const applyJobPatch = async (
@@ -1266,6 +1274,195 @@ function CameraShell({
         videoCodec,
         videoFrameSize,
         viewMode,
+      ],
+  );
+
+  const retryMediaJob = useCallback(
+      (job: MediaJob) => {
+        void (async () => {
+          const applyJobPatch = async (
+              patch: Partial<Omit<MediaJob, 'id' | 'captureId' | 'type' | 'createdAt'>>,
+          ) => {
+            setMediaJobs(previous => updateMediaJobInList(previous, job.id, patch));
+            const jobs = await updateMediaJob(job.id, patch);
+            setMediaJobs(jobs);
+          };
+          const sourceUri = typeof job.input.sourceUri === 'string' ? job.input.sourceUri : '';
+          if (!sourceUri) {
+            await applyJobPatch({
+              status: 'failed',
+              errorMessage: '缺少源文件，无法重试',
+            }).catch(() => {});
+            setToast('缺少源文件，无法重试');
+            return;
+          }
+
+          try {
+            await applyJobPatch({
+              status: 'queued',
+              progress: 0,
+              errorMessage: undefined,
+              retryCount: job.retryCount + 1,
+            });
+            await runQueuedMediaJob(async () => {
+              await applyJobPatch({ status: 'running', progress: 0.08 });
+              if (job.type === 'video-variant') {
+                const targetSize = job.input.targetSize as { width?: number; height?: number } | undefined;
+                const subPath = await createVideoVariant(
+                    sourceUri,
+                    (job.input.variant as VisibleFrameSpec['variant']) ?? 'landscape',
+                    'sub',
+                    {
+                      width: Number(targetSize?.width ?? 1280),
+                      height: Number(targetSize?.height ?? 720),
+                    },
+                    (job.input.codec as VideoCodecFormat) ?? videoCodec,
+                    false,
+                    Boolean(job.input.rotateLandscapeFallback),
+                );
+                await applyJobPatch({ status: 'running', progress: 0.72 });
+                const subSaved = await saveToGallery(subPath, 'video', '副画面');
+                await saveCaptureGroupToIndex({
+                  captureId: job.captureId,
+                  createdAt: job.createdAt,
+                  assets: [
+                    buildReadyAsset({
+                      captureId: job.captureId,
+                      createdAt: job.createdAt,
+                      type: 'video',
+                      role: 'sub',
+                      aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                      uri: subSaved.uri,
+                      localPath: subSaved.localPath,
+                      sourceUri,
+                    }),
+                  ],
+                });
+                await applyJobPatch({
+                  status: 'succeeded',
+                  progress: 1,
+                  output: { uri: subSaved.uri, localPath: subSaved.localPath },
+                });
+                setToast('副画面视频已保存');
+                return;
+              }
+
+              const mainSpec = job.input.mainSpec as VisibleFrameSpec | undefined;
+              const subSpec = job.input.subSpec as VisibleFrameSpec | undefined;
+              const rotateLandscapeFallback =
+                  job.input.rotateLandscapeFallback as { main?: boolean; sub?: boolean } | undefined;
+              if (!mainSpec) {
+                throw new Error('缺少照片构图参数');
+              }
+              const format = (job.input.format as PhotoFormat) ?? photoFormat;
+              const quality = Number(job.input.quality ?? photoQualityConfig.nativeQuality);
+              const mirror = Boolean(job.input.mirror);
+              if (job.type === 'photo-pack') {
+                if (!subSpec) {
+                  throw new Error('缺少副画面构图参数');
+                }
+                const { mainPath, subPath } = await createDualPhotoVariantsForAspects(
+                    sourceUri,
+                    mainSpec,
+                    subSpec,
+                    format,
+                    quality,
+                    mirror,
+                    {
+                      main: Boolean(rotateLandscapeFallback?.main),
+                      sub: Boolean(rotateLandscapeFallback?.sub),
+                    },
+                );
+                await applyJobPatch({ status: 'running', progress: 0.45 });
+                const [mainSaved, subSaved] = await Promise.all([
+                  saveToGallery(mainPath, 'photo', '主画面'),
+                  saveToGallery(subPath, 'photo', '副画面'),
+                ]);
+                await saveCaptureGroupToIndex({
+                  captureId: job.captureId,
+                  createdAt: job.createdAt,
+                  assets: [
+                    buildReadyAsset({
+                      captureId: job.captureId,
+                      createdAt: job.createdAt,
+                      type: 'photo',
+                      role: 'main',
+                      aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                      uri: mainSaved.uri,
+                      localPath: mainSaved.localPath,
+                      sourceUri,
+                    }),
+                    buildReadyAsset({
+                      captureId: job.captureId,
+                      createdAt: job.createdAt,
+                      type: 'photo',
+                      role: 'sub',
+                      aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                      uri: subSaved.uri,
+                      localPath: subSaved.localPath,
+                      sourceUri,
+                    }),
+                  ],
+                });
+                await applyJobPatch({
+                  status: 'succeeded',
+                  progress: 1,
+                  output: { mainUri: mainSaved.uri, subUri: subSaved.uri },
+                });
+                setToast('照片组已保存');
+                return;
+              }
+
+              const mainPath = await createPhotoVariantForAspect(
+                  sourceUri,
+                  mainSpec,
+                  'main',
+                  format,
+                  quality,
+                  mirror,
+                  Boolean(rotateLandscapeFallback?.main),
+              );
+              const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
+              await saveCaptureGroupToIndex({
+                captureId: job.captureId,
+                createdAt: job.createdAt,
+                assets: [
+                  buildReadyAsset({
+                    captureId: job.captureId,
+                    createdAt: job.createdAt,
+                    type: 'photo',
+                    role: 'main',
+                    aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                    uri: mainSaved.uri,
+                    localPath: mainSaved.localPath,
+                    sourceUri,
+                  }),
+                ],
+              });
+              await applyJobPatch({
+                status: 'succeeded',
+                progress: 1,
+                output: { uri: mainSaved.uri, localPath: mainSaved.localPath },
+              });
+              setToast('照片已保存');
+            });
+          } catch (error) {
+            await applyJobPatch({
+              status: 'failed',
+              errorMessage: cameraErrorMessage(error, '重试失败'),
+            }).catch(() => {});
+            setToast(cameraErrorMessage(error, '重试失败'));
+          }
+        })();
+      },
+      [
+        photoFormat,
+        photoQualityConfig.nativeQuality,
+        saveCaptureGroupToIndex,
+        saveToGallery,
+        selectedAspectId,
+        setMediaJobs,
+        videoCodec,
       ],
   );
 
@@ -1591,6 +1788,7 @@ function CameraShell({
               onClose={closeGallery}
               onDelete={handleGalleryDelete}
               onIndexChange={setGalleryIndex}
+              onRetryMediaJob={retryMediaJob}
               translateX={panX}
           />
         </View>

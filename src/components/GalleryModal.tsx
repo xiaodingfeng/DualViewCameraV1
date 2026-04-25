@@ -41,6 +41,7 @@ export function GalleryView({
   onClose,
   onDelete,
   onIndexChange,
+  onRetryMediaJob,
   mediaJobs = [],
   translateX,
 }: {
@@ -49,6 +50,7 @@ export function GalleryView({
   onClose: () => void;
   onDelete: (item: GalleryMedia) => void;
   onIndexChange: (index: number) => void;
+  onRetryMediaJob?: (job: MediaJob) => void;
   mediaJobs?: MediaJob[];
   translateX: Animated.AnimatedInterpolation<number>;
 }) {
@@ -149,7 +151,7 @@ export function GalleryView({
               {Math.abs(groupIndex - index) > 2 ? (
                 <View style={styles.galleryLazyPage} />
               ) : item == null ? (
-                <FailedMediaJobFallback jobs={failedJobs} />
+                <FailedMediaJobFallback jobs={failedJobs} onRetry={onRetryMediaJob} />
               ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
                 <ZoomablePhoto
                   item={item}
@@ -167,7 +169,9 @@ export function GalleryView({
               ) : (
                 <MediaPreviewFallback item={item} />
               )}
-              {failedJobs.length > 0 && item != null ? <FailedMediaJobBanner jobs={failedJobs} /> : null}
+              {failedJobs.length > 0 && item != null ? (
+                <FailedMediaJobBanner jobs={failedJobs} onRetry={onRetryMediaJob} />
+              ) : null}
               {group.items.length > 1 ? (
                 <View style={styles.galleryAssetStrip}>
                   {group.items.map((asset, assetIndex) => (
@@ -505,7 +509,13 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
   );
 }
 
-function FailedMediaJobBanner({ jobs }: { jobs: MediaJob[] }) {
+function FailedMediaJobBanner({
+  jobs,
+  onRetry,
+}: {
+  jobs: MediaJob[];
+  onRetry?: (job: MediaJob) => void;
+}) {
   const [job] = jobs;
   if (job == null) return null;
   return (
@@ -514,11 +524,22 @@ function FailedMediaJobBanner({ jobs }: { jobs: MediaJob[] }) {
       <Text style={styles.galleryJobBannerText} numberOfLines={2}>
         {job.errorMessage ?? '后台处理失败'}
       </Text>
+      {onRetry ? (
+        <Pressable style={styles.galleryJobRetryButton} onPress={() => onRetry(job)}>
+          <Text style={styles.galleryJobRetryText}>重试</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
-function FailedMediaJobFallback({ jobs }: { jobs: MediaJob[] }) {
+function FailedMediaJobFallback({
+  jobs,
+  onRetry,
+}: {
+  jobs: MediaJob[];
+  onRetry?: (job: MediaJob) => void;
+}) {
   const [job] = jobs;
   return (
     <View style={styles.mediaPreviewFallback}>
@@ -527,6 +548,11 @@ function FailedMediaJobFallback({ jobs }: { jobs: MediaJob[] }) {
       <Text style={styles.videoPreviewHint}>
         {job?.errorMessage ?? '该组没有可预览的成功资产'}
       </Text>
+      {job && onRetry ? (
+        <Pressable style={styles.galleryJobRetryButton} onPress={() => onRetry(job)}>
+          <Text style={styles.galleryJobRetryText}>重试</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
