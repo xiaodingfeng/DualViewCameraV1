@@ -47,6 +47,7 @@ export function enrichGalleryMediaWithIndex(
   if (groups.length === 0) return items;
 
   const byKey = new Map<string, { group: DualCaptureGroup; asset: DualMediaAsset }>();
+  const matchedAssetIds = new Set<string>();
   groups.forEach(group => {
     group.assets.forEach(asset => {
       assetKeys(asset).forEach(key => byKey.set(key, { group, asset }));
@@ -59,6 +60,7 @@ export function enrichGalleryMediaWithIndex(
         .map(key => byKey.get(key))
         .find(Boolean);
       if (!match) return item;
+      matchedAssetIds.add(match.asset.id);
 
       return {
         ...item,
@@ -66,8 +68,11 @@ export function enrichGalleryMediaWithIndex(
         captureRole: match.asset.role,
         captureGroupSize: match.group.assets.length,
         captureGroupCreatedAt: match.group.createdAt,
+        captureStatus: match.asset.status,
+        errorMessage: match.asset.errorMessage,
       };
     })
+    .concat(failedAssetsAsGalleryMedia(groups, matchedAssetIds))
     .sort((a, b) => {
       const aGroupTime = a.captureGroupCreatedAt ?? a.timestamp;
       const bGroupTime = b.captureGroupCreatedAt ?? b.timestamp;
@@ -97,6 +102,29 @@ export function buildReadyAsset(input: {
     localPath: input.localPath,
     sourceUri: input.sourceUri,
     status: 'ready',
+  };
+}
+
+export function buildFailedAsset(input: {
+  captureId: string;
+  createdAt: number;
+  type: 'photo' | 'video';
+  role: DualMediaRole;
+  aspect: DualMediaAsset['aspect'];
+  sourceUri?: string;
+  errorMessage: string;
+}): DualMediaAsset {
+  return {
+    id: `${input.captureId}_${input.role}_failed`,
+    captureId: input.captureId,
+    createdAt: input.createdAt,
+    type: input.type,
+    role: input.role,
+    aspect: input.aspect,
+    uri: `failed://${input.captureId}/${input.role}`,
+    sourceUri: input.sourceUri,
+    status: 'failed',
+    errorMessage: input.errorMessage,
   };
 }
 
@@ -167,6 +195,39 @@ function assetKeys(asset: DualMediaAsset): string[] {
     filenameFromPath(asset.uri),
     filenameFromPath(asset.localPath),
   ]);
+}
+
+function failedAssetsAsGalleryMedia(
+  groups: DualCaptureGroup[],
+  matchedAssetIds: Set<string>,
+): GalleryMedia[] {
+  return groups.flatMap(group =>
+    group.assets
+      .filter(asset => {
+        const hasReadyAssetForRole = group.assets.some(
+          candidate => candidate.role === asset.role && candidate.status === 'ready',
+        );
+        return asset.status === 'failed' && !matchedAssetIds.has(asset.id) && !hasReadyAssetForRole;
+      })
+      .map(asset => ({
+        id: asset.id,
+        uri: asset.uri,
+        filepath: null,
+        type: asset.type === 'video' ? 'video' : 'photo',
+        filename: null,
+        fileSize: null,
+        width: 0,
+        height: 0,
+        duration: 0,
+        timestamp: asset.createdAt,
+        captureId: group.captureId,
+        captureRole: asset.role,
+        captureGroupSize: group.assets.length,
+        captureGroupCreatedAt: group.createdAt,
+        captureStatus: 'failed',
+        errorMessage: asset.errorMessage,
+      })),
+  );
 }
 
 function itemKeys(item: GalleryMedia): string[] {

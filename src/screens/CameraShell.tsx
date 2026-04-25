@@ -90,6 +90,7 @@ import {
   toFileUri,
 } from '../utils/gallery';
 import {
+  buildFailedAsset,
   buildReadyAsset,
   upsertCaptureGroup,
 } from '../utils/mediaIndex';
@@ -1050,11 +1051,27 @@ function CameraShell({
             }
             });
           } catch (error) {
+            const message = cameraErrorMessage(error, '照片保存失败');
             await applyJobPatch({
               status: 'failed',
-              errorMessage: cameraErrorMessage(error, '照片保存失败'),
+              errorMessage: message,
             }).catch(() => {});
-            setToast(cameraErrorMessage(error, '照片保存失败'));
+            await saveCaptureGroupToIndex({
+              captureId,
+              createdAt,
+              assets: [
+                buildFailedAsset({
+                  captureId,
+                  createdAt,
+                  type: 'photo',
+                  role: options.dual ? 'sub' : 'main',
+                  aspect: selectedAspectId,
+                  sourceUri: filePath,
+                  errorMessage: message,
+                }),
+              ],
+            }).catch(() => {});
+            setToast(message);
           }
         })();
       },
@@ -1251,9 +1268,25 @@ function CameraShell({
                 });
                 });
               } catch (error) {
+                const message = cameraErrorMessage(error, '副画面视频后台处理失败');
                 await applyJobPatch({
                   status: 'failed',
-                  errorMessage: cameraErrorMessage(error, '副画面视频后台处理失败'),
+                  errorMessage: message,
+                }).catch(() => {});
+                await saveCaptureGroupToIndex({
+                  captureId,
+                  createdAt,
+                  assets: [
+                    buildFailedAsset({
+                      captureId,
+                      createdAt,
+                      type: 'video',
+                      role: 'sub',
+                      aspect: selectedAspectId,
+                      sourceUri: filePath,
+                      errorMessage: message,
+                    }),
+                  ],
                 }).catch(() => {});
                 setToast('副画面视频后台处理失败，已保留主画面视频');
               }
@@ -1447,11 +1480,27 @@ function CameraShell({
               setToast('照片已保存');
             });
           } catch (error) {
+            const message = cameraErrorMessage(error, '重试失败');
             await applyJobPatch({
               status: 'failed',
-              errorMessage: cameraErrorMessage(error, '重试失败'),
+              errorMessage: message,
             }).catch(() => {});
-            setToast(cameraErrorMessage(error, '重试失败'));
+            await saveCaptureGroupToIndex({
+              captureId: job.captureId,
+              createdAt: job.createdAt,
+              assets: [
+                buildFailedAsset({
+                  captureId: job.captureId,
+                  createdAt: job.createdAt,
+                  type: job.type === 'video-variant' ? 'video' : 'photo',
+                  role: job.type === 'photo-variant' ? 'main' : 'sub',
+                  aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                  sourceUri,
+                  errorMessage: message,
+                }),
+              ],
+            }).catch(() => {});
+            setToast(message);
           }
         })();
       },

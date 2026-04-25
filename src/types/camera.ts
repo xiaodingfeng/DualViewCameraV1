@@ -20,6 +20,8 @@ export type GalleryMedia = {
   captureRole?: 'main' | 'sub' | 'vertical' | 'horizontal' | 'square' | 'source' | 'cover';
   captureGroupSize?: number;
   captureGroupCreatedAt?: number;
+  captureStatus?: 'processing' | 'ready' | 'failed';
+  errorMessage?: string;
 };
 
 export type AspectRatioId = 'full' | '1:1' | '4:3' | '16:9';

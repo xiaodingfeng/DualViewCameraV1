@@ -1901,3 +1901,38 @@ cd android
 
 ### 下一步
 - 评估并实现失败 asset 写入 Media Asset Index，使 Gallery 分组和任务历史长期一致。
+
+---
+
+## 2026-04-25 升级记录（十二）
+### 本次目标
+- 继续 Phase 5：将失败任务写入 Media Asset Index，减少 Gallery 对 `media-jobs.json` 临时状态的依赖。
+
+### 修改文件
+- `src/types/camera.ts`
+- `src/utils/mediaIndex.ts`
+- `src/components/GalleryModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `GalleryMedia` 新增 `captureStatus` 和 `errorMessage` 字段，用于展示失败资产。
+- `mediaIndex.ts` 新增 `buildFailedAsset()`，失败资产使用 `failed://{captureId}/{role}` 作为稳定占位 URI。
+- `enrichGalleryMediaWithIndex()` 会把 Media Asset Index 中没有对应真实相册文件的失败资产追加为 Gallery 占位项。
+- 若同一 capture group 内同一角色已有 ready asset，则隐藏对应 failed asset，避免重试成功后仍显示旧失败项。
+- 照片任务、副画面视频任务和重试任务失败时都会写入 failed asset。
+- Gallery 能渲染 failed asset 占位；如果仍有对应失败 job，则保留“重试”按钮。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- 失败资产目前只表达“该角色处理失败”，没有细分为转码、裁剪、相册入库等子阶段。
+- 成功后旧 failed asset 仍保留在索引文件中，只是在 Gallery 展示层被 ready asset 覆盖隐藏；后续可增加索引清理。
+
+### 下一步
+- 为 Media Asset Index 增加清理策略：当同角色 ready asset 存在时，合并时移除旧 failed asset。

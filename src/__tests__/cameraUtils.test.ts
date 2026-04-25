@@ -41,7 +41,11 @@ import {
   firstSupportedVideoQuality,
 } from '../utils/cameraCapabilities';
 import { ensureVideoExtension } from '../utils/gallery';
-import { buildReadyAsset, enrichGalleryMediaWithIndex } from '../utils/mediaIndex';
+import {
+  buildFailedAsset,
+  buildReadyAsset,
+  enrichGalleryMediaWithIndex,
+} from '../utils/mediaIndex';
 import {
   createMediaJob,
   markStaleRunningJobs,
@@ -275,6 +279,34 @@ describe('media index helpers', () => {
     expect(item.captureId).toBe('cap_1');
     expect(item.captureRole).toBe('sub');
     expect(item.captureGroupSize).toBe(1);
+  });
+
+  it('adds failed media index assets as gallery placeholders', () => {
+    const failedAsset = buildFailedAsset({
+      captureId: 'cap_failed',
+      createdAt: 2000,
+      type: 'video',
+      role: 'sub',
+      aspect: '16:9',
+      sourceUri: '/tmp/source.mp4',
+      errorMessage: '副画面视频后台处理失败',
+    });
+
+    const [item] = enrichGalleryMediaWithIndex([], [
+      {
+        captureId: 'cap_failed',
+        createdAt: 2000,
+        mode: 'dual',
+        outputPackId: 'dual-main-sub',
+        assets: [failedAsset],
+      },
+    ]);
+
+    expect(item.captureId).toBe('cap_failed');
+    expect(item.captureRole).toBe('sub');
+    expect(item.captureStatus).toBe('failed');
+    expect(item.errorMessage).toBe('副画面视频后台处理失败');
+    expect(item.type).toBe('video');
   });
 });
 

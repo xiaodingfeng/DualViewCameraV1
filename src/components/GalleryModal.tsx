@@ -152,6 +152,8 @@ export function GalleryView({
                 <View style={styles.galleryLazyPage} />
               ) : item == null ? (
                 <FailedMediaJobFallback jobs={failedJobs} onRetry={onRetryMediaJob} />
+              ) : item.captureStatus === 'failed' ? (
+                <FailedAssetFallback item={item} job={failedJobs[0]} onRetry={onRetryMediaJob} />
               ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
                 <ZoomablePhoto
                   item={item}
@@ -547,6 +549,31 @@ function FailedMediaJobFallback({
       <Text style={styles.videoPreviewTitle}>{job ? `${mediaJobLabel(job)}失败` : '后台处理失败'}</Text>
       <Text style={styles.videoPreviewHint}>
         {job?.errorMessage ?? '该组没有可预览的成功资产'}
+      </Text>
+      {job && onRetry ? (
+        <Pressable style={styles.galleryJobRetryButton} onPress={() => onRetry(job)}>
+          <Text style={styles.galleryJobRetryText}>重试</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function FailedAssetFallback({
+  item,
+  job,
+  onRetry,
+}: {
+  item: GalleryMedia;
+  job?: MediaJob;
+  onRetry?: (job: MediaJob) => void;
+}) {
+  return (
+    <View style={styles.mediaPreviewFallback}>
+      <Text style={styles.videoPreviewIcon}>!</Text>
+      <Text style={styles.videoPreviewTitle}>{roleLabel(item.captureRole)}失败</Text>
+      <Text style={styles.videoPreviewHint}>
+        {item.errorMessage ?? '后台处理失败'}
       </Text>
       {job && onRetry ? (
         <Pressable style={styles.galleryJobRetryButton} onPress={() => onRetry(job)}>
