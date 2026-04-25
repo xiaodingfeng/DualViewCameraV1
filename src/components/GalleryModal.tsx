@@ -14,6 +14,7 @@ import {
 import { NativeDualViewVideoView, DualViewMedia } from '../native/dualViewMedia';
 import { styles } from '../styles/cameraStyles';
 import type { GalleryMedia } from '../types/camera';
+import type { MediaJob } from '../types/mediaJob';
 import {
   clamp,
   clampPhotoTranslate,
@@ -31,6 +32,7 @@ type GalleryMediaGroup = {
   id: string;
   createdAt: number;
   items: GalleryMedia[];
+  jobs: MediaJob[];
 };
 
 export function GalleryView({
@@ -39,6 +41,7 @@ export function GalleryView({
   onClose,
   onDelete,
   onIndexChange,
+  mediaJobs = [],
   translateX,
 }: {
   index: number;
@@ -46,6 +49,7 @@ export function GalleryView({
   onClose: () => void;
   onDelete: (item: GalleryMedia) => void;
   onIndexChange: (index: number) => void;
+  mediaJobs?: MediaJob[];
   translateX: Animated.AnimatedInterpolation<number>;
 }) {
   const listRef = useRef<FlatList<GalleryMediaGroup> | null>(null);
@@ -54,7 +58,7 @@ export function GalleryView({
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(() => new Set());
   const [zoomLocked, setZoomLocked] = useState(false);
   const [assetIndexByGroup, setAssetIndexByGroup] = useState<Record<string, number>>({});
-  const groups = useMemo(() => groupGalleryItems(items), [items]);
+  const groups = useMemo(() => groupGalleryItems(items, mediaJobs), [items, mediaJobs]);
   const currentGroup = groups[index] ?? null;
   const currentAssetIndex = currentGroup
     ? Math.min(assetIndexByGroup[currentGroup.id] ?? 0, currentGroup.items.length - 1)
@@ -137,12 +141,15 @@ export function GalleryView({
               assetIndexByGroup[group.id] ?? 0,
               group.items.length - 1,
             );
-            const item = group.items[groupAssetIndex];
+            const item = group.items[groupAssetIndex] ?? null;
+            const failedJobs = group.jobs.filter(job => job.status === 'failed');
 
             return (
             <View style={[styles.galleryPage, { width: viewerWidth }]}>
               {Math.abs(groupIndex - index) > 2 ? (
                 <View style={styles.galleryLazyPage} />
+              ) : item == null ? (
+                <FailedMediaJobFallback jobs={failedJobs} />
               ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
                 <ZoomablePhoto
                   item={item}
@@ -160,6 +167,7 @@ export function GalleryView({
               ) : (
                 <MediaPreviewFallback item={item} />
               )}
+              {failedJobs.length > 0 && item != null ? <FailedMediaJobBanner jobs={failedJobs} /> : null}
               {group.items.length > 1 ? (
                 <View style={styles.galleryAssetStrip}>
                   {group.items.map((asset, assetIndex) => (
@@ -497,7 +505,33 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
   );
 }
 
-function groupGalleryItems(items: GalleryMedia[]): GalleryMediaGroup[] {
+function FailedMediaJobBanner({ jobs }: { jobs: MediaJob[] }) {
+  const [job] = jobs;
+  if (job == null) return null;
+  return (
+    <View style={styles.galleryJobBanner}>
+      <Text style={styles.galleryJobBannerTitle}>{mediaJobLabel(job)}失败</Text>
+      <Text style={styles.galleryJobBannerText} numberOfLines={2}>
+        {job.errorMessage ?? '后台处理失败'}
+      </Text>
+    </View>
+  );
+}
+
+function FailedMediaJobFallback({ jobs }: { jobs: MediaJob[] }) {
+  const [job] = jobs;
+  return (
+    <View style={styles.mediaPreviewFallback}>
+      <Text style={styles.videoPreviewIcon}>!</Text>
+      <Text style={styles.videoPreviewTitle}>{job ? `${mediaJobLabel(job)}失败` : '后台处理失败'}</Text>
+      <Text style={styles.videoPreviewHint}>
+        {job?.errorMessage ?? '该组没有可预览的成功资产'}
+      </Text>
+    </View>
+  );
+}
+
+function groupGalleryItems(items: GalleryMedia[], jobs: MediaJob[] = []): GalleryMediaGroup[] {
   const groups = new Map<string, GalleryMediaGroup>();
 
   items.forEach(item => {
@@ -513,8 +547,26 @@ function groupGalleryItems(items: GalleryMedia[]): GalleryMediaGroup[] {
       id,
       createdAt: item.captureGroupCreatedAt ?? item.timestamp,
       items: [item],
+      jobs: [],
     });
   });
+
+  jobs
+    .filter(job => job.status === 'failed')
+    .forEach(job => {
+      const existing = groups.get(job.captureId);
+      if (existing) {
+        existing.jobs.push(job);
+        existing.createdAt = Math.max(existing.createdAt, job.createdAt);
+        return;
+      }
+      groups.set(job.captureId, {
+        id: job.captureId,
+        createdAt: job.createdAt,
+        items: [],
+        jobs: [job],
+      });
+    });
 
   return Array.from(groups.values())
     .map(group => ({
@@ -522,6 +574,23 @@ function groupGalleryItems(items: GalleryMedia[]): GalleryMediaGroup[] {
       items: group.items.sort((a, b) => roleOrder(a.captureRole) - roleOrder(b.captureRole)),
     }))
     .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function mediaJobLabel(job: MediaJob): string {
+  switch (job.type) {
+    case 'video-variant':
+      return '副画面视频';
+    case 'photo-pack':
+      return '照片组';
+    case 'photo-variant':
+      return '照片';
+    case 'cover-generate':
+      return '封面';
+    case 'gallery-save':
+      return '相册保存';
+    default:
+      return '后台任务';
+  }
 }
 
 function roleOrder(role?: GalleryMedia['captureRole']): number {

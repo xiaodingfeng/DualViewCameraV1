@@ -1587,6 +1587,7 @@ function CameraShell({
           <GalleryView
               index={galleryIndex}
               items={galleryItems}
+              mediaJobs={mediaJobs}
               onClose={closeGallery}
               onDelete={handleGalleryDelete}
               onIndexChange={setGalleryIndex}

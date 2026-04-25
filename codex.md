@@ -1835,3 +1835,37 @@ cd android
 ### 下一步
 - 为 Gallery 分组补充失败 asset 状态展示。
 - 设计任务失败后的重试入口，优先覆盖副画面视频和照片素材包。
+
+---
+
+## 2026-04-25 升级记录（十）
+### 本次目标
+- 修复项目中文字乱码，确保源码按 UTF-8 文本维护。
+- 继续下一阶段：Gallery 分组展示后台任务失败状态。
+
+### 修改文件
+- `src/screens/CameraShell.tsx`
+- `src/components/GalleryModal.tsx`
+- `src/styles/cameraStyles.ts`
+- `codex.md`
+
+### 关键实现
+- 修复 `照片保存失败` 的 mojibake 文案，已提交 bugfix。
+- 使用 UTF-8 读取方式扫描 `src`、`__tests__`、`codex.md`、`agents.md`、`README.md`，未发现同类 mojibake 模式残留。
+- `GalleryView` 新增 `mediaJobs` 输入，将失败任务按 `captureId` 归入同一 Gallery group。
+- 当 group 有成功资产但存在失败任务时，画面内显示失败提示条。
+- 当 group 只有失败任务、没有成功资产时，Gallery 显示失败占位，避免空白页。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- Gallery 目前只展示失败状态，还没有重试/取消按钮。
+- 失败任务仍依赖 `MediaJob` 记录，尚未写回 Media Asset Index 成为持久失败 asset。
+
+### 下一步
+- 为失败任务增加重试入口。
+- 评估是否需要将失败 asset 写入 Media Asset Index，以便任务历史和 Gallery 分组长期一致。
