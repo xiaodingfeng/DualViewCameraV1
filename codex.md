@@ -1652,3 +1652,49 @@ cd android
 
 ### 下一步
 - 进入后续 Phase 4 / Task：建立 Media Asset Index，把一次拍摄的主图、副图、视频变体按 `captureId` 成组。
+
+---
+
+## 2026-04-25 升级记录（五）
+
+### 本次目标
+- 开始 Phase 4：建立 Media Asset Index 最小闭环。
+- 先完成本地 JSON 索引、保存链路写入和 Gallery 元数据合并，后续再做完整 group-first Gallery UI。
+
+### 修改文件
+- `src/types/mediaAsset.ts`
+- `src/utils/captureId.ts`
+- `src/utils/mediaIndex.ts`
+- `src/types/camera.ts`
+- `src/utils/gallery.ts`
+- `src/screens/CameraShell.tsx`
+- `src/components/GalleryModal.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `__tests__/App.test.tsx`
+- `codex.md`
+
+### 关键实现
+- 新增 `DualMediaAsset`、`DualCaptureGroup`、`OutputPackId` 等媒体索引类型。
+- 新增 `createCaptureId()`，用于一次拍摄生成稳定分组 ID。
+- 新增 `media-index.json` 读写工具，路径为 `DocumentDirectoryPath/DualViewCamera/media-index.json`。
+- 写入索引前会读取旧索引并合并同一 `captureId`，最多保留最近 500 个 capture group；JSON 损坏时备份为 `media-index.broken.{timestamp}.json` 后重建。
+- 拍照保存链路写入索引：单画面生成 `main` asset；双画面主图和副图共享同一个 `captureId`。
+- 录像保存链路写入索引：主视频先写入 `main` asset；副视频后台转码完成后用同一个 `captureId` 合并写入 `sub` asset。
+- `loadDualViewGallery()` 加载系统相册后读取本地索引，为 `GalleryMedia` 补充 `captureId`、`captureRole`、`captureGroupSize` 和 `captureGroupCreatedAt`，并让同组资产靠在一起排序。
+- Gallery 顶部和详情页显示主画面 / 副画面等角色信息，便于验证索引是否命中。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+- [ ] 真机双画面拍照后主/副图共享 `captureId`（待设备验证）
+- [ ] App 重启后索引仍在（待设备验证）
+
+### 已知问题
+- Gallery 目前仍是 flat media viewer，只是按索引补充分组元数据并让同组资产相邻；尚未完成“首屏只显示 capture group、组内左右滑资产”的完整 UI。
+- 索引不会删除系统相册文件；删除媒体后索引清理将在后续 Gallery 分组 UI 或 Media Job Queue 阶段补齐。
+- 资产宽高、时长仍以系统相册查询为准；本地索引用于分组和角色，不替代 MediaStore。
+
+### 下一步
+- 继续 Phase 4：把 Gallery 改为 group-first 展示，一个 capture group 在首屏只占一个入口，进入后查看组内主图 / 副图 / 视频变体。
+- 随后进入 Phase 5：Media Job Queue，把副视频转码、照片素材包生成和失败状态从轻量 toast 升级为可追踪任务。

@@ -96,7 +96,11 @@ export function GalleryView({
       onLayout={event => setViewerWidth(event.nativeEvent.layout.width)}
     >
       <View style={styles.galleryTopBar}>
-        <Text style={styles.galleryCount}>{items.length > 0 ? `${index + 1}/${items.length}` : '0/0'}</Text>
+        <Text style={styles.galleryCount}>
+          {items.length > 0
+            ? `${index + 1}/${items.length}${current?.captureRole ? ` · ${roleLabel(current.captureRole)}` : ''}`
+            : '0/0'}
+        </Text>
       </View>
 
       {viewerWidth > 0 && items.length > 0 ? (
@@ -416,6 +420,14 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
     <View style={styles.mediaDetails}>
       <Text style={styles.mediaDetailsTitle}>{item.type === 'photo' ? '照片详情' : '视频详情'}</Text>
       <Text style={styles.mediaDetailsText}>文件：{item.filename ?? '未知'}</Text>
+      {item.captureId ? (
+        <>
+          <Text style={styles.mediaDetailsText}>拍摄组：{item.captureId}</Text>
+          <Text style={styles.mediaDetailsText}>
+            角色：{roleLabel(item.captureRole)}（共 {item.captureGroupSize ?? 1} 项）
+          </Text>
+        </>
+      ) : null}
       <Text style={styles.mediaDetailsText}>时间：{formatTimestamp(item.timestamp)}</Text>
       <Text style={styles.mediaDetailsText}>尺寸：{item.width || '-'} × {item.height || '-'}</Text>
       {item.type === 'video' ? (
@@ -427,4 +439,25 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
       </Text>
     </View>
   );
+}
+
+function roleLabel(role?: GalleryMedia['captureRole']): string {
+  switch (role) {
+    case 'main':
+      return '主画面';
+    case 'sub':
+      return '副画面';
+    case 'vertical':
+      return '竖图';
+    case 'horizontal':
+      return '横图';
+    case 'square':
+      return '方图';
+    case 'cover':
+      return '封面';
+    case 'source':
+      return '源文件';
+    default:
+      return '媒体';
+  }
 }

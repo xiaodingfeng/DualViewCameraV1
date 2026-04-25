@@ -35,6 +35,8 @@ jest.mock('react-native-fs', () => ({
   readFile: jest.fn(),
   writeFile: jest.fn(() => Promise.resolve()),
   copyFile: jest.fn(() => Promise.resolve()),
+  mkdir: jest.fn(() => Promise.resolve()),
+  moveFile: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('@react-native-camera-roll/camera-roll', () => ({

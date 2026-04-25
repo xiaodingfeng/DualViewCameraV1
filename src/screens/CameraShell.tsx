@@ -76,6 +76,7 @@ import {
   buildCameraCapabilities,
   firstSupportedVideoQuality,
 } from '../utils/cameraCapabilities';
+import { createCaptureId } from '../utils/captureId';
 import { buildCompositionScene } from '../utils/composition';
 import {
   cameraRollNodeToGalleryMedia,
@@ -87,6 +88,11 @@ import {
   mediaToLastMedia,
   toFileUri,
 } from '../utils/gallery';
+import {
+  buildReadyAsset,
+  upsertCaptureGroup,
+} from '../utils/mediaIndex';
+import type { DualMediaAsset } from '../types/mediaAsset';
 import {
   isAspectRatioId,
   isPhotoFormat,
@@ -851,9 +857,31 @@ function CameraShell({
         const saved = await CameraRoll.saveAsset(uri, { type, album: 'DualViewCamera' });
         setLastMedia(mediaToLastMedia(cameraRollNodeToGalleryMedia(saved)));
         refreshGallery().catch(() => {});
-        return saved.node.image.uri;
+        return {
+          uri: saved.node.image.uri,
+          localPath: sourcePath,
+        };
       },
       [refreshGallery],
+  );
+
+  const saveCaptureGroupToIndex = useCallback(
+      async (input: {
+        captureId: string;
+        createdAt: number;
+        assets: DualMediaAsset[];
+      }) => {
+        if (input.assets.length === 0) return;
+        await upsertCaptureGroup({
+          captureId: input.captureId,
+          createdAt: input.createdAt,
+          mode: viewMode,
+          outputPackId:
+              viewMode === 'dual' && saveDualOutputs ? 'dual-main-sub' : 'current-only',
+          assets: input.assets,
+        });
+      },
+      [saveDualOutputs, viewMode],
   );
 
   const saveCapturedPhotoInBackground = useCallback(
@@ -869,6 +897,8 @@ function CameraShell({
             rotateLandscapeFallback: { main: boolean; sub: boolean };
           },
       ) => {
+        const captureId = createCaptureId();
+        const createdAt = Date.now();
         void (async () => {
           try {
             if (options.dual) {
@@ -882,10 +912,36 @@ function CameraShell({
                   options.rotateLandscapeFallback,
               );
 
-              await Promise.all([
+              const [mainSaved, subSaved] = await Promise.all([
                 saveToGallery(mainPath, 'photo', '主画面'),
                 saveToGallery(subPath, 'photo', '副画面'),
               ]);
+              await saveCaptureGroupToIndex({
+                captureId,
+                createdAt,
+                assets: [
+                  buildReadyAsset({
+                    captureId,
+                    createdAt,
+                    type: 'photo',
+                    role: 'main',
+                    aspect: selectedAspectId,
+                    uri: mainSaved.uri,
+                    localPath: mainSaved.localPath,
+                    sourceUri: filePath,
+                  }),
+                  buildReadyAsset({
+                    captureId,
+                    createdAt,
+                    type: 'photo',
+                    role: 'sub',
+                    aspect: selectedAspectId,
+                    uri: subSaved.uri,
+                    localPath: subSaved.localPath,
+                    sourceUri: filePath,
+                  }),
+                ],
+              });
             } else {
               const mainPath = await createPhotoVariantForAspect(
                   filePath,
@@ -896,14 +952,30 @@ function CameraShell({
                   options.mirror,
                   options.rotateLandscapeFallback.main,
               );
-              await saveToGallery(mainPath, 'photo', '主画面');
+              const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
+              await saveCaptureGroupToIndex({
+                captureId,
+                createdAt,
+                assets: [
+                  buildReadyAsset({
+                    captureId,
+                    createdAt,
+                    type: 'photo',
+                    role: 'main',
+                    aspect: selectedAspectId,
+                    uri: mainSaved.uri,
+                    localPath: mainSaved.localPath,
+                    sourceUri: filePath,
+                  }),
+                ],
+              });
             }
           } catch (error) {
             setToast(cameraErrorMessage(error, '照片保存失败'));
           }
         })();
       },
-      [saveToGallery],
+      [saveCaptureGroupToIndex, saveToGallery, selectedAspectId],
   );
 
   const prepareFlashForPhoto = useCallback(async () => {
@@ -1004,10 +1076,28 @@ function CameraShell({
 
   const finishRecording = useCallback(
       async (filePath: string) => {
+        const captureId = createCaptureId();
+        const createdAt = Date.now();
         let originalSaved = false;
         try {
-          await saveToGallery(filePath, 'video', '主画面');
+          const mainSaved = await saveToGallery(filePath, 'video', '主画面');
           originalSaved = true;
+          await saveCaptureGroupToIndex({
+            captureId,
+            createdAt,
+            assets: [
+              buildReadyAsset({
+                captureId,
+                createdAt,
+                type: 'video',
+                role: 'main',
+                aspect: selectedAspectId,
+                uri: mainSaved.uri,
+                localPath: mainSaved.localPath,
+                sourceUri: filePath,
+              }),
+            ],
+          });
           setToast(viewMode === 'dual' && saveDualOutputs ? '主画面视频已保存，副画面稍后后台处理' : '视频已保存');
 
           if (viewMode === 'dual' && saveDualOutputs) {
@@ -1023,7 +1113,23 @@ function CameraShell({
                     false,
                     shouldRotateSubLandscapeFallback,
                 );
-                await saveToGallery(subPath, 'video', '副画面');
+                const subSaved = await saveToGallery(subPath, 'video', '副画面');
+                await saveCaptureGroupToIndex({
+                  captureId,
+                  createdAt,
+                  assets: [
+                    buildReadyAsset({
+                      captureId,
+                      createdAt,
+                      type: 'video',
+                      role: 'sub',
+                      aspect: selectedAspectId,
+                      uri: subSaved.uri,
+                      localPath: subSaved.localPath,
+                      sourceUri: filePath,
+                    }),
+                  ],
+                });
                 setToast('副画面视频已保存');
               } catch {
                 setToast('副画面视频后台处理失败，已保留主画面视频');
@@ -1034,7 +1140,17 @@ function CameraShell({
           setToast(originalSaved ? '副画面视频后台处理失败，已保留主画面视频' : '录像保存失败');
         }
       },
-      [saveDualOutputs, saveToGallery, saveSubFrameSpec, shouldRotateSubLandscapeFallback, videoCodec, videoFrameSize, viewMode],
+      [
+        saveCaptureGroupToIndex,
+        saveDualOutputs,
+        saveToGallery,
+        saveSubFrameSpec,
+        selectedAspectId,
+        shouldRotateSubLandscapeFallback,
+        videoCodec,
+        videoFrameSize,
+        viewMode,
+      ],
   );
 
   const toggleRecording = useCallback(async () => {

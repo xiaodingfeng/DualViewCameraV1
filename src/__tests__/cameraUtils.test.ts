@@ -1,6 +1,12 @@
 jest.mock('react-native-fs', () => ({
+  DocumentDirectoryPath: '/documents',
   CachesDirectoryPath: '/cache',
+  exists: jest.fn(() => Promise.resolve(false)),
+  readFile: jest.fn(),
+  writeFile: jest.fn(() => Promise.resolve()),
   copyFile: jest.fn(() => Promise.resolve()),
+  mkdir: jest.fn(() => Promise.resolve()),
+  moveFile: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('@react-native-camera-roll/camera-roll', () => ({
@@ -35,6 +41,7 @@ import {
   firstSupportedVideoQuality,
 } from '../utils/cameraCapabilities';
 import { ensureVideoExtension } from '../utils/gallery';
+import { buildReadyAsset, enrichGalleryMediaWithIndex } from '../utils/mediaIndex';
 import {
   isAspectRatioId,
   isPhotoFormat,
@@ -218,5 +225,49 @@ describe('camera capabilities', () => {
     expect(capabilities.videoQualities['1080']).toBe(true);
     expect(capabilities.videoQualities['4K']).toBe(false);
     expect(firstSupportedVideoQuality(capabilities)).toBe('1080');
+  });
+});
+
+describe('media index helpers', () => {
+  it('enriches gallery media with capture group metadata', () => {
+    const asset = buildReadyAsset({
+      captureId: 'cap_1',
+      createdAt: 1000,
+      type: 'photo',
+      role: 'sub',
+      aspect: '16:9',
+      uri: 'content://media/1',
+      localPath: '/storage/DCIM/DualViewCamera/sub.jpg',
+    });
+
+    const [item] = enrichGalleryMediaWithIndex(
+      [
+        {
+          id: '1',
+          uri: 'content://media/1',
+          filepath: '/storage/DCIM/DualViewCamera/sub.jpg',
+          type: 'photo',
+          filename: 'sub.jpg',
+          fileSize: 12,
+          width: 1920,
+          height: 1080,
+          duration: 0,
+          timestamp: 1000,
+        },
+      ],
+      [
+        {
+          captureId: 'cap_1',
+          createdAt: 1000,
+          mode: 'dual',
+          outputPackId: 'dual-main-sub',
+          assets: [asset],
+        },
+      ],
+    );
+
+    expect(item.captureId).toBe('cap_1');
+    expect(item.captureRole).toBe('sub');
+    expect(item.captureGroupSize).toBe(1);
   });
 });
