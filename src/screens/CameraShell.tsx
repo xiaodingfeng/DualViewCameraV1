@@ -1047,7 +1047,7 @@ function CameraShell({
           } catch (error) {
             await applyJobPatch({
               status: 'failed',
-              errorMessage: cameraErrorMessage(error, '鐓х墖淇濆瓨澶辫触'),
+              errorMessage: cameraErrorMessage(error, '照片保存失败'),
             }).catch(() => {});
             setToast(cameraErrorMessage(error, '照片保存失败'));
           }
