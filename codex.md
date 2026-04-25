@@ -1896,6 +1896,33 @@ cd android
 - 真机验证四种布局下的预览显示、对焦、拍照和录像主链路。
 - 后续再考虑为模板增加更明确的小图标预览；当前先用文字 Chip 降低改动风险。
 
+---
+
+## 2026-04-25 升级记录（十六）
+### 本次目标
+- 继续 Phase 7：把当前设备不支持的已保存设置自动降级逻辑收口到 Capability Service。
+
+### 修改文件
+- `src/utils/cameraCapabilities.ts`
+- `src/screens/CameraShell.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `resolveSettingsForCapabilities()`，统一处理闪光灯、照片格式、录像帧率、录像画质、录像编码的能力降级。
+- `CameraShell` 不再散落逐项判断不可用设置，改为调用能力服务返回的 `patch` 并应用降级。
+- 设备不支持已保存设置时，会通过 Toast 给出第一条明确提示，例如不支持 HEIF、4K 或 60HZ 时自动切回可用选项。
+- 单元测试覆盖不可用能力组合下的降级结果，确保旧设置在前后摄切换或设备能力变化后不会继续保留危险值。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- 继续 Phase 7：把能力服务扩展到“双画面稳定性策略”，在双画面模式下对高风险规格做更明确的预览态/录制态降级提示。
+
 ### 已知问题
 - Gallery 目前只展示失败状态，还没有重试/取消按钮。
 - 失败任务仍依赖 `MediaJob` 记录，尚未写回 Media Asset Index 成为持久失败 asset。

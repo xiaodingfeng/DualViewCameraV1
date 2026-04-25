@@ -39,6 +39,7 @@ import { buildCompositionScene } from '../utils/composition';
 import {
   buildCameraCapabilities,
   firstSupportedVideoQuality,
+  resolveSettingsForCapabilities,
 } from '../utils/cameraCapabilities';
 import { ensureVideoExtension } from '../utils/gallery';
 import {
@@ -243,6 +244,35 @@ describe('camera capabilities', () => {
     expect(capabilities.videoQualities['1080']).toBe(true);
     expect(capabilities.videoQualities['4K']).toBe(false);
     expect(firstSupportedVideoQuality(capabilities)).toBe('1080');
+  });
+
+  it('downgrades persisted settings that are unavailable on the active device', () => {
+    const resolution = resolveSettingsForCapabilities(
+      {
+        deviceId: 'front-0',
+        flash: { auto: false, on: false, torch: false },
+        photoFormats: { jpeg: true, heic: false },
+        videoFps: { 30: true, 60: false },
+        videoQualities: { '720': true, '1080': true, '4K': false, '8K': false },
+        videoCodecs: { h265: false, h264: true },
+      },
+      {
+        flashMode: 'on',
+        photoFormat: 'heic',
+        videoFps: 60,
+        videoQuality: '4K',
+        videoCodec: 'h265',
+      },
+    );
+
+    expect(resolution.patch).toEqual({
+      flashMode: 'off',
+      photoFormat: 'jpeg',
+      videoFps: 30,
+      videoQuality: '1080',
+      videoCodec: 'h264',
+    });
+    expect(resolution.messages.length).toBeGreaterThan(0);
   });
 });
 

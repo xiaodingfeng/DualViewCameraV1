@@ -85,7 +85,7 @@ import {
 } from '../utils/camera';
 import {
   buildCameraCapabilities,
-  firstSupportedVideoQuality,
+  resolveSettingsForCapabilities,
 } from '../utils/cameraCapabilities';
 import { createCaptureId } from '../utils/captureId';
 import { buildCompositionScene } from '../utils/composition';
@@ -436,27 +436,20 @@ function CameraShell({
   useEffect(() => {
     if (!settingsLoaded) return;
 
-    if (flashMode === 'auto' && !capabilities.flash.auto) {
-      setFlashMode('off');
-    } else if (flashMode === 'on' && !capabilities.flash.on) {
-      setFlashMode('off');
-    }
+    const { patch, messages } = resolveSettingsForCapabilities(capabilities, {
+      flashMode,
+      photoFormat,
+      videoCodec,
+      videoFps,
+      videoQuality,
+    });
 
-    if (!capabilities.photoFormats[photoFormat]) {
-      setPhotoFormat('jpeg');
-    }
-
-    if (!capabilities.videoFps[videoFps]) {
-      setVideoFps(30);
-    }
-
-    if (!capabilities.videoQualities[videoQuality]) {
-      setVideoQuality(firstSupportedVideoQuality(capabilities));
-    }
-
-    if (!capabilities.videoCodecs[videoCodec]) {
-      setVideoCodec('h264');
-    }
+    if (patch.flashMode != null) setFlashMode(patch.flashMode);
+    if (patch.photoFormat != null) setPhotoFormat(patch.photoFormat);
+    if (patch.videoFps != null) setVideoFps(patch.videoFps);
+    if (patch.videoQuality != null) setVideoQuality(patch.videoQuality);
+    if (patch.videoCodec != null) setVideoCodec(patch.videoCodec);
+    if (messages.length > 0) setToast(messages[0]);
   }, [
     capabilities,
     flashMode,
