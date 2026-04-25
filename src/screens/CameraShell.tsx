@@ -52,11 +52,11 @@ import type {
   AspectRatioId,
   CaptureMode,
   FlashMode,
-  FrameOrientation,
   GalleryMedia,
   LastMedia,
   PhotoFormat,
   PhotoQuality,
+  SafetyOverlayMode,
   VideoCodecFormat,
   VideoFps,
   VideoQuality,
@@ -70,9 +70,13 @@ import {
   isCameraResourceBusyError,
   videoFpsOptionsForQuality,
   videoTargetSizeForAspect,
-  visibleFrameSpec,
   wait,
 } from '../utils/camera';
+import {
+  buildCameraCapabilities,
+  firstSupportedVideoQuality,
+} from '../utils/cameraCapabilities';
+import { buildCompositionScene } from '../utils/composition';
 import {
   cameraRollNodeToGalleryMedia,
   createDualPhotoVariantsForAspects,
@@ -87,6 +91,7 @@ import {
   isAspectRatioId,
   isPhotoFormat,
   isPhotoQuality,
+  isSafetyOverlayMode,
   isVideoCodecFormat,
   isVideoFps,
   isVideoQuality,
@@ -129,6 +134,7 @@ function CameraShell({
       () => ASPECT_RATIOS.find(item => item.id === selectedAspectId) ?? ASPECT_RATIOS[2],
       [selectedAspectId],
   );
+  const capabilities = useMemo(() => buildCameraCapabilities(device), [device]);
   const photoQualityConfig = PHOTO_QUALITY_CONFIG[photoQuality];
   const appliedVideoQualityConfig = VIDEO_QUALITY_CONFIG[appliedVideoQuality];
 
@@ -168,6 +174,7 @@ function CameraShell({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveDualOutputs, setSaveDualOutputs] = useState(true);
   const [shutterSoundEnabled, setShutterSoundEnabled] = useState(false);
+  const [safetyOverlayMode, setSafetyOverlayMode] = useState<SafetyOverlayMode>('subtle');
 
   const [zoom, setZoom] = useState(() => clamp(1, device.minZoom, device.maxZoom));
   const [isRulerMode, setIsRulerMode] = useState(false);
@@ -354,6 +361,7 @@ function CameraShell({
           if (isViewMode(settings.viewMode)) setViewMode(settings.viewMode);
           if (typeof settings.saveDualOutputs === 'boolean') setSaveDualOutputs(settings.saveDualOutputs);
           if (typeof settings.shutterSoundEnabled === 'boolean') setShutterSoundEnabled(settings.shutterSoundEnabled);
+          if (isSafetyOverlayMode(settings.safetyOverlayMode)) setSafetyOverlayMode(settings.safetyOverlayMode);
         })
         .finally(() => {
           if (!cancelled) setSettingsLoaded(true);
@@ -367,6 +375,40 @@ function CameraShell({
   useEffect(() => {
     if (!settingsLoaded) return;
 
+    if (flashMode === 'auto' && !capabilities.flash.auto) {
+      setFlashMode('off');
+    } else if (flashMode === 'on' && !capabilities.flash.on) {
+      setFlashMode('off');
+    }
+
+    if (!capabilities.photoFormats[photoFormat]) {
+      setPhotoFormat('jpeg');
+    }
+
+    if (!capabilities.videoFps[videoFps]) {
+      setVideoFps(30);
+    }
+
+    if (!capabilities.videoQualities[videoQuality]) {
+      setVideoQuality(firstSupportedVideoQuality(capabilities));
+    }
+
+    if (!capabilities.videoCodecs[videoCodec]) {
+      setVideoCodec('h264');
+    }
+  }, [
+    capabilities,
+    flashMode,
+    photoFormat,
+    settingsLoaded,
+    videoCodec,
+    videoFps,
+    videoQuality,
+  ]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+
     savePersistedSettings({
       selectedAspectId,
       photoQuality,
@@ -376,12 +418,14 @@ function CameraShell({
       videoCodec,
       viewMode,
       saveDualOutputs,
+      safetyOverlayMode,
       shutterSoundEnabled,
     }).catch(() => {});
   }, [
     photoFormat,
     photoQuality,
     saveDualOutputs,
+    safetyOverlayMode,
     selectedAspectId,
     settingsLoaded,
     shutterSoundEnabled,
@@ -394,55 +438,40 @@ function CameraShell({
   const isDeviceLandscape = physicalOrientation === 'left' || physicalOrientation === 'right';
   const shouldMirrorSavedPhoto = cameraPosition === 'front';
   const captureOutputOrientation: Orientation | null = physicalOrientation ?? null;
-  const displayPrimaryOrientation: FrameOrientation = 'portrait';
-  const displaySecondaryOrientation: FrameOrientation = 'landscape';
-  const savePrimaryOrientation: FrameOrientation = isDeviceLandscape ? 'landscape' : 'portrait';
-  const saveSecondaryOrientation: FrameOrientation = isDeviceLandscape ? 'portrait' : 'landscape';
-
-  const mainDisplayOrientation: FrameOrientation =
-      viewMode === 'dual'
-          ? (isSwapped ? displaySecondaryOrientation : displayPrimaryOrientation)
-          : displayPrimaryOrientation;
-
-  const subDisplayOrientation: FrameOrientation =
-      viewMode === 'dual'
-          ? (isSwapped ? displayPrimaryOrientation : displaySecondaryOrientation)
-          : displaySecondaryOrientation;
-
   const fullMainAspect =
       previewSize.width > 0 && previewSize.height > 0
           ? previewSize.width / Math.max(1, previewSize.height)
           : 9 / 16;
 
-  const mainFrameSpec = useMemo(
-      () => visibleFrameSpec(mainDisplayOrientation, selectedAspect, fullMainAspect),
-      [fullMainAspect, mainDisplayOrientation, selectedAspect],
+  const compositionScene = useMemo(
+      () =>
+          buildCompositionScene({
+            viewMode,
+            selectedAspect,
+            isSwapped,
+            isDeviceLandscape,
+            fullMainAspect,
+            saveDualOutputs,
+          }),
+      [
+        fullMainAspect,
+        isDeviceLandscape,
+        isSwapped,
+        saveDualOutputs,
+        selectedAspect,
+        viewMode,
+      ],
   );
 
-  const subFrameSpec = useMemo(
-      () => visibleFrameSpec(subDisplayOrientation, selectedAspect, 3 / 4),
-      [selectedAspect, subDisplayOrientation],
-  );
-
-  const saveMainOrientation: FrameOrientation =
-      viewMode === 'dual'
-          ? (isSwapped ? saveSecondaryOrientation : savePrimaryOrientation)
-          : savePrimaryOrientation;
-
-  const saveSubOrientation: FrameOrientation =
-      viewMode === 'dual'
-          ? (isSwapped ? savePrimaryOrientation : saveSecondaryOrientation)
-          : saveSecondaryOrientation;
-
-  const saveMainFrameSpec = useMemo(
-      () => visibleFrameSpec(saveMainOrientation, selectedAspect, fullMainAspect),
-      [fullMainAspect, saveMainOrientation, selectedAspect],
-  );
-
-  const saveSubFrameSpec = useMemo(
-      () => visibleFrameSpec(saveSubOrientation, selectedAspect, 3 / 4),
-      [saveSubOrientation, selectedAspect],
-  );
+  const mainDisplayOrientation = compositionScene.display.main.orientation;
+  const subDisplayOrientation =
+      compositionScene.display.sub?.orientation ?? 'landscape';
+  const mainFrameSpec = compositionScene.display.main;
+  const subFrameSpec = compositionScene.display.sub ?? compositionScene.save.sub;
+  const saveMainOrientation = compositionScene.save.main.orientation;
+  const saveSubOrientation = compositionScene.save.sub.orientation;
+  const saveMainFrameSpec = compositionScene.save.main;
+  const saveSubFrameSpec = compositionScene.save.sub;
   const shouldRotateMainLandscapeFallback = isDeviceLandscape && saveMainOrientation === 'landscape';
   const shouldRotateSubLandscapeFallback = isDeviceLandscape && saveSubOrientation === 'landscape';
 
@@ -1225,9 +1254,12 @@ function CameraShell({
           >
             <MainPreview
                 hybridRef={previewHybridRef}
+                cropSpec={mainFrameSpec}
                 orientation={mainDisplayOrientation}
                 aspectRatio={mainPreviewAspect}
                 frame={mainPreviewFrame}
+                isRecording={isRecording}
+                overlayMode={safetyOverlayMode}
                 bottomOffset={mainPreviewBottomOffset}
                 topOffset={previewTopOffset}
                 fillScreen={isFullPreview}
@@ -1263,9 +1295,12 @@ function CameraShell({
             {viewMode === 'dual' && (
                 <PipPreview
                     aspectRatio={subFrameSpec.aspect}
+                    cropSpec={subFrameSpec}
                     isSwapped={isSwapped}
+                    isRecording={isRecording}
                     orientation={subDisplayOrientation}
                     onPress={swapMainAndSub}
+                    overlayMode={safetyOverlayMode}
                     previewOutput={
                       captureMode === 'photo'
                           ? pendingPhotoCapture
@@ -1329,6 +1364,7 @@ function CameraShell({
         <SettingsModal
             device={device}
             devicesCount={devicesCount}
+            capabilities={capabilities}
             flashMode={flashMode}
             onClose={() => setSettingsOpen(false)}
             onFlashModeChange={setFlashMode}
@@ -1338,6 +1374,8 @@ function CameraShell({
             photoQuality={photoQuality}
             onPhotoQualityChange={setPhotoQuality}
             saveDualOutputs={saveDualOutputs}
+            safetyOverlayMode={safetyOverlayMode}
+            onSafetyOverlayModeChange={setSafetyOverlayMode}
             setSaveDualOutputs={setSaveDualOutputs}
             shutterSoundEnabled={shutterSoundEnabled}
             onShutterSoundEnabledChange={setShutterSoundEnabled}

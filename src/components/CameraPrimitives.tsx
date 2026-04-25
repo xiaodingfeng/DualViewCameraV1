@@ -17,6 +17,7 @@ import FlashOnIcon from '../../assets/icons/flash-on.svg';
 import SettingsIcon from '../../assets/icons/settings.svg';
 import SwitchCameraIcon from '../../assets/icons/switch.svg';
 
+import { CompositionOverlay } from './CompositionOverlay';
 import { ASPECT_RATIOS, PX_PER_ZOOM, VIDEO_QUALITY_CONFIG, ZOOM_BAR_WIDTH } from '../config/camera';
 import { styles } from '../styles/cameraStyles';
 import type {
@@ -25,9 +26,11 @@ import type {
   FlashMode,
   FrameOrientation,
   LastMedia,
+  SafetyOverlayMode,
   VideoFps,
   VideoQuality,
 } from '../types/camera';
+import type { CropSpec } from '../types/composition';
 import {
   calculateContainedFrame,
   clamp,
@@ -233,17 +236,23 @@ export function BottomControls({
 
 export function PipPreview({
   aspectRatio,
+  cropSpec,
   isSwapped,
+  isRecording,
   orientation,
   onPress,
+  overlayMode,
   previewOutput,
   sessionRevision,
   placeholderMode,
 }: {
   aspectRatio: number;
+  cropSpec: CropSpec;
   isSwapped: boolean;
+  isRecording: boolean;
   orientation: FrameOrientation;
   onPress: () => void;
+  overlayMode: SafetyOverlayMode;
   previewOutput: any | null;
   sessionRevision: number;
   placeholderMode: 'photo' | 'video' | null;
@@ -273,6 +282,7 @@ export function PipPreview({
           )}
         </View>
       )}
+      <CompositionOverlay crop={cropSpec} isRecording={isRecording} mode={overlayMode} role="sub" />
       <Text style={styles.pipLabel}>
         {placeholderMode ? placeholderTitle : isSwapped ? '主画面' : `副 ${formatAspectLabel(aspectRatio)}`}
       </Text>
@@ -283,10 +293,13 @@ export function PipPreview({
 
 export function MainPreview({
   bottomOffset,
+  cropSpec,
   fillScreen,
   frame,
   hybridRef,
+  isRecording,
   orientation,
+  overlayMode,
   aspectRatio,
   previewOutput,
   sessionRevision,
@@ -295,9 +308,12 @@ export function MainPreview({
 }: {
   fillScreen: boolean;
   bottomOffset: number;
+  cropSpec: CropSpec;
   frame: { width: any; height: any };
   hybridRef: unknown;
+  isRecording: boolean;
   orientation: FrameOrientation;
+  overlayMode: SafetyOverlayMode;
   aspectRatio?: number;
   previewOutput: any;
   sessionRevision: number;
@@ -334,6 +350,7 @@ export function MainPreview({
             </View>
           </View>
         )}
+        <CompositionOverlay crop={cropSpec} isRecording={isRecording} mode={overlayMode} role="main" />
       </View>
     </View>
   );

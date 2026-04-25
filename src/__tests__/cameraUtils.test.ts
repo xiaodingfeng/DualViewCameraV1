@@ -30,10 +30,15 @@ import {
   visibleFrameSpec,
 } from '../utils/camera';
 import { buildCompositionScene } from '../utils/composition';
+import {
+  buildCameraCapabilities,
+  firstSupportedVideoQuality,
+} from '../utils/cameraCapabilities';
 import { ensureVideoExtension } from '../utils/gallery';
 import {
   isAspectRatioId,
   isPhotoFormat,
+  isSafetyOverlayMode,
   isVideoCodecFormat,
   isVideoFps,
   isVideoQuality,
@@ -135,6 +140,8 @@ describe('settings guards', () => {
     expect(isPhotoFormat('jpg')).toBe(false);
     expect(isVideoCodecFormat('h265')).toBe(true);
     expect(isVideoCodecFormat('av1')).toBe(false);
+    expect(isSafetyOverlayMode('subtle')).toBe(true);
+    expect(isSafetyOverlayMode('visible')).toBe(false);
     expect(isVideoFps(60)).toBe(true);
     expect(isVideoFps(24)).toBe(false);
     expect(isVideoQuality('4K')).toBe(true);
@@ -186,5 +193,30 @@ describe('buildCompositionScene', () => {
     expect(scene.outputs.find(output => output.id === 'sub-video')?.enabled).toBe(
       false,
     );
+  });
+});
+
+describe('camera capabilities', () => {
+  it('derives flash, fps and quality support from the active device', () => {
+    const device = {
+      id: 'back-0',
+      hasFlash: true,
+      hasTorch: false,
+      supportsFPS: jest.fn((fps: number) => fps <= 30),
+      getSupportedResolutions: jest.fn(() => [
+        { width: 1920, height: 1080 },
+        { width: 1280, height: 720 },
+      ]),
+    };
+
+    const capabilities = buildCameraCapabilities(device as any);
+
+    expect(capabilities.deviceId).toBe('back-0');
+    expect(capabilities.flash).toEqual({ auto: true, on: true, torch: false });
+    expect(capabilities.videoFps[30]).toBe(true);
+    expect(capabilities.videoFps[60]).toBe(false);
+    expect(capabilities.videoQualities['1080']).toBe(true);
+    expect(capabilities.videoQualities['4K']).toBe(false);
+    expect(firstSupportedVideoQuality(capabilities)).toBe('1080');
   });
 });

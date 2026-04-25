@@ -14,11 +14,13 @@ import type {
   FlashMode,
   PhotoFormat,
   PhotoQuality,
+  SafetyOverlayMode,
   VideoCodecFormat,
   VideoFps,
   VideoQuality,
   ViewMode,
 } from '../types/camera';
+import type { CameraCapabilities } from '../types/cameraCapabilities';
 
 type SettingsTab = 'photo' | 'video' | 'about';
 type LegalDocType = 'service' | 'privacy' | 'sharing' | null;
@@ -26,6 +28,7 @@ type LegalDocType = 'service' | 'privacy' | 'sharing' | null;
 function SettingsModal({
   device,
   devicesCount,
+  capabilities,
   flashMode,
   onClose,
   onFlashModeChange,
@@ -35,6 +38,8 @@ function SettingsModal({
   photoQuality,
   onPhotoQualityChange,
   saveDualOutputs,
+  safetyOverlayMode,
+  onSafetyOverlayModeChange,
   setSaveDualOutputs,
   shutterSoundEnabled,
   onShutterSoundEnabledChange,
@@ -49,6 +54,7 @@ function SettingsModal({
 }: {
   device: CameraDevice | null;
   devicesCount: number;
+  capabilities: CameraCapabilities;
   flashMode: FlashMode;
   onClose: () => void;
   onFlashModeChange: (mode: FlashMode) => void;
@@ -58,6 +64,8 @@ function SettingsModal({
   photoQuality: PhotoQuality;
   onPhotoQualityChange: (value: PhotoQuality) => void;
   saveDualOutputs: boolean;
+  safetyOverlayMode: SafetyOverlayMode;
+  onSafetyOverlayModeChange: (value: SafetyOverlayMode) => void;
   setSaveDualOutputs: (value: boolean) => void;
   shutterSoundEnabled: boolean;
   onShutterSoundEnabledChange: (value: boolean) => void;
@@ -155,30 +163,40 @@ function SettingsModal({
                 </SettingsSection>
                 <SettingsSection title="照片格式">
                   {(['jpeg', 'heic'] as PhotoFormat[]).map(value => (
-                    <Chip key={value} active={photoFormat === value} label={PHOTO_FORMAT_CONFIG[value].label} onPress={() => onPhotoFormatChange(value)} />
+                    <Chip key={value} active={photoFormat === value} disabled={!capabilities.photoFormats[value]} label={PHOTO_FORMAT_CONFIG[value].label} onPress={() => onPhotoFormatChange(value)} />
                   ))}
                 </SettingsSection>
                 <SettingsSection title="闪光灯">
                   <Chip active={flashMode === 'off'} label="关闭" onPress={() => onFlashModeChange('off')} />
-                  <Chip active={flashMode === 'auto'} disabled={!device?.hasFlash} label="自动" onPress={() => onFlashModeChange('auto')} />
-                  <Chip active={flashMode === 'on'} disabled={!device?.hasFlash && !device?.hasTorch} label="开启" onPress={() => onFlashModeChange('on')} />
+                  <Chip active={flashMode === 'auto'} disabled={!capabilities.flash.auto} label="自动" onPress={() => onFlashModeChange('auto')} />
+                  <Chip active={flashMode === 'on'} disabled={!capabilities.flash.on} label="开启" onPress={() => onFlashModeChange('on')} />
+                </SettingsSection>
+                <SettingsSection title="构图安全框">
+                  {(['off', 'subtle', 'strong'] as SafetyOverlayMode[]).map(value => (
+                    <Chip key={value} active={safetyOverlayMode === value} label={SAFETY_OVERLAY_LABELS[value]} onPress={() => onSafetyOverlayModeChange(value)} />
+                  ))}
                 </SettingsSection>
               </>
             ) : tab === 'video' ? (
               <>
                 <SettingsSection title="默认帧率">
                   {([30, 60] as VideoFps[]).map(value => (
-                    <Chip key={value} active={videoFps === value} disabled={!videoFpsOptions.includes(value)} label={`${value}HZ`} onPress={() => onVideoFpsChange(value)} />
+                    <Chip key={value} active={videoFps === value} disabled={!videoFpsOptions.includes(value) || !capabilities.videoFps[value]} label={`${value}HZ`} onPress={() => onVideoFpsChange(value)} />
                   ))}
                 </SettingsSection>
                 <SettingsSection title="默认画质">
                   {(['720', '1080', '4K', '8K'] as VideoQuality[]).map(value => (
-                    <Chip key={value} active={videoQuality === value} label={VIDEO_QUALITY_CONFIG[value].label} onPress={() => onVideoQualityChange(value)} />
+                    <Chip key={value} active={videoQuality === value} disabled={!capabilities.videoQualities[value]} label={VIDEO_QUALITY_CONFIG[value].label} onPress={() => onVideoQualityChange(value)} />
                   ))}
                 </SettingsSection>
                 <SettingsSection title="编码格式">
                   {(['h265', 'h264'] as VideoCodecFormat[]).map(value => (
-                    <Chip key={value} active={videoCodec === value} label={VIDEO_CODEC_CONFIG[value].label} onPress={() => onVideoCodecChange(value)} />
+                    <Chip key={value} active={videoCodec === value} disabled={!capabilities.videoCodecs[value]} label={VIDEO_CODEC_CONFIG[value].label} onPress={() => onVideoCodecChange(value)} />
+                  ))}
+                </SettingsSection>
+                <SettingsSection title="构图安全框">
+                  {(['off', 'subtle', 'strong'] as SafetyOverlayMode[]).map(value => (
+                    <Chip key={value} active={safetyOverlayMode === value} label={SAFETY_OVERLAY_LABELS[value]} onPress={() => onSafetyOverlayModeChange(value)} />
                   ))}
                 </SettingsSection>
               </>
@@ -187,7 +205,7 @@ function SettingsModal({
                 <SettingsSection title="软件信息">
                   <Text style={styles.aboutAppTitle}>Agile</Text>
                   <Text style={styles.aboutVersion}>版本：1.0.0 (Build 20260419)</Text>
-                  <Text style={[styles.settingLine, { marginTop: 8 }]}>Agile 是一款专为高效构图设计的双画面相机，支持主副画面同时采集。所有媒体文件均保存在本地 DCIM 目录，保护隐私，拒绝云端上传。</Text>
+                  <Text style={[styles.settingLine, { marginTop: 8 }]}>Agile 是一款专为高效构图设计的双画面相机，支持同一摄像头的主副构图同时输出。所有媒体文件均保存在本地 DCIM 目录，保护隐私，拒绝云端上传。</Text>
                 </SettingsSection>
                 <SettingsSection title="合规指引">
                   <Pressable style={styles.legalLink} onPress={() => setLegalDoc('service')}>
@@ -255,6 +273,12 @@ function SettingsSection({ children, title }: { children: React.ReactNode; title
 function Chip({ active = false, disabled = false, label, onPress }: { active?: boolean; disabled?: boolean; label: string; onPress?: () => void }) {
   return <Pressable disabled={disabled || onPress == null} style={[styles.chip, active && styles.chipActive, disabled && styles.chipDisabled]} onPress={onPress}><Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text></Pressable>;
 }
+
+const SAFETY_OVERLAY_LABELS: Record<SafetyOverlayMode, string> = {
+  off: '关闭',
+  subtle: '轻量',
+  strong: '明显',
+};
 
 function RoundButton({ active = false, label, onPress, style, children }: { active?: boolean; label: string; onPress: () => void; style?: any; children?: React.ReactNode }) {
   return <Pressable style={[styles.roundButton, active && styles.roundButtonActive, style]} onPress={onPress}>{children ? children : <Text style={styles.roundButtonText}>{label}</Text>}</Pressable>;

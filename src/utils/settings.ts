@@ -6,6 +6,7 @@ import type {
   PersistedSettings,
   PhotoFormat,
   PhotoQuality,
+  SafetyOverlayMode,
   VideoCodecFormat,
   VideoFps,
   VideoQuality,
@@ -48,6 +49,10 @@ export function isVideoFps(value: unknown): value is VideoFps {
 
 export function isVideoCodecFormat(value: unknown): value is VideoCodecFormat {
   return value === 'h265' || value === 'h264';
+}
+
+export function isSafetyOverlayMode(value: unknown): value is SafetyOverlayMode {
+  return value === 'off' || value === 'subtle' || value === 'strong';
 }
 
 export function isViewMode(value: unknown): value is ViewMode {

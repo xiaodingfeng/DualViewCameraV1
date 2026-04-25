@@ -24,6 +24,7 @@ export type PhotoFormat = 'jpeg' | 'heic';
 export type VideoQuality = '720' | '1080' | '4K' | '8K';
 export type VideoFps = 30 | 60;
 export type VideoCodecFormat = 'h265' | 'h264';
+export type SafetyOverlayMode = 'off' | 'subtle' | 'strong';
 export type PhotoVariant = 'full' | 'portrait' | 'landscape' | 'square' | 'photo4x3' | 'video16x9';
 export type VisibleFrameSpec = { aspect: number; variant: PhotoVariant };
 export type PersistedSettings = Partial<{
@@ -36,6 +37,7 @@ export type PersistedSettings = Partial<{
   viewMode: ViewMode;
   saveDualOutputs: boolean;
   shutterSoundEnabled: boolean;
+  safetyOverlayMode: SafetyOverlayMode;
 }>;
 
 export type NativeVideoViewProps = ViewProps & { sourceUri: string };

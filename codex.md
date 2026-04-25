@@ -109,6 +109,12 @@ cd android
 .\gradlew.bat :app:assembleDebug --console plain --stacktrace
 ```
 
+验证规则补充：
+
+- 如果本轮没有修改 `android/`、Gradle 配置、原生模块、依赖版本或会影响 APK 打包的配置文件，可以不重新执行 `.\gradlew.bat :app:assembleDebug --console plain --stacktrace`。
+- 仅修改 TypeScript / React Native JS / 文档 / Jest 测试时，默认执行 `npm test -- --runInBand` 和 `npx tsc --noEmit`；是否需要 Android Debug 构建按变更风险单独判断并在记录中说明。
+- 修改 `CameraShell.tsx` 等相机主链路 JS 文件时，至少必须执行 `npm test -- --runInBand` 和 `npx tsc --noEmit`；Android 构建仅在涉及 Android 代码、依赖、打包配置或需要验证 APK 内置 bundle 时执行。
+
 真机回归重点：
 
 - 首次启动权限申请。
@@ -147,7 +153,7 @@ cd android
 - 不要无意义重排 import、样式对象和大型 JSX。
 - 只格式化本次改动触及的局部区域。
 - 如果需要引入 Prettier，先单独提交“格式化配置”，不要和业务变更混合。
-- 相机主链路文件如 `CameraShell.tsx` 每次改动后必须重新跑 TypeScript 和 Android Debug 构建。
+- 相机主链路文件如 `CameraShell.tsx` 每次改动后必须重新跑 TypeScript；如果没有 Android 代码、依赖、Gradle 或打包配置改动，可以不跑 Android Debug 构建，但必须在升级记录中说明跳过原因。
 
 ### 0.6 文档同步规则
 
@@ -1537,3 +1543,112 @@ cd android
 
 ### 下一步
 - 执行 Task 2：在 `CameraShell.tsx` 中接入 `buildCompositionScene()`，以 scene 输出替换现有 `mainFrameSpec`、`subFrameSpec`、`saveMainFrameSpec`、`saveSubFrameSpec` 派生逻辑，并保持行为不变。
+
+---
+
+## 2026-04-25 升级记录（二）
+
+### 本次目标
+- 补充验证规则：没有 Android 代码、依赖、Gradle 或打包配置改动时，不强制执行 Android Debug 构建。
+- 执行 Task 2：用 Composition Engine 替换 `CameraShell.tsx` 内部的构图派生逻辑。
+- 执行 Task 3：增加可关闭、可持久化的构图安全框，不改变拍摄输出。
+
+### 修改文件
+- `codex.md`
+- `src/screens/CameraShell.tsx`
+- `src/components/CameraPrimitives.tsx`
+- `src/components/CompositionOverlay.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/types/camera.ts`
+- `src/utils/settings.ts`
+- `src/__tests__/cameraUtils.test.ts`
+
+### 关键实现
+- `CameraShell.tsx` 新增 `compositionScene`，由 `buildCompositionScene()` 统一产出主/副显示构图、主/副保存构图和方向；下游变量名保持不变，拍照/录像保存入口不改。
+- 新增 `SafetyOverlayMode = 'off' | 'subtle' | 'strong'`，默认值为 `subtle`，并纳入设置读写和类型守卫。
+- 新增 `CompositionOverlay`，使用 React Native 轻量 `View`/`Text` 叠层绘制边框、角标和主/副构图标签，`pointerEvents="none"`，不抢占对焦、缩放和 PiP 点击。
+- 录像中 overlay 自动降级为最小边框，不显示文字标签。
+- 设置页在拍照和录像页签中提供“构图安全框：关闭 / 轻量 / 明显”入口。
+- 按用户补充要求更新验证规则：无 Android 代码改动时不必重跑 `:app:assembleDebug`。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按新规则跳过）
+- [ ] 真机单画面拍照
+- [ ] 真机双画面拍照
+- [ ] 真机双画面录像
+
+### 已知问题
+- 本轮未做真机视觉回归；需要在下一次设备验证时确认安全框不会遮挡关键 UI，且 PiP 点击、主预览对焦和缩放手势仍正常。
+- 安全框当前只提示可见构图范围，不做复杂网格线或安全区模板。
+
+### 下一步
+- 执行 Task 4：修正文档和设置页文案，避免“同时采集”等表述误导为已支持前后双摄并发。
+- 执行 Task 5：建立最小设备能力服务，将设置页硬编码能力入口收口到统一模型。
+
+---
+
+## 2026-04-25 升级记录（三）
+
+### 本次目标
+- 执行 Task 4 的用户可见文案修正，避免误导为已支持前后双摄并发。
+
+### 修改文件
+- `src/components/SettingsModal.tsx`
+- `codex.md`
+
+### 关键实现
+- 设置页关于文案从“主副画面同时采集”改为“同一摄像头的主副构图同时输出”。
+- 确认 `README.md` 和 `agents.md` 已明确“双画面是同一摄像头同源预览的多视图裁剪，不是双摄并发”。
+- 确认 App 内和公开协作文档中不再出现“同时采集”误导表述。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] 文案搜索：`src/components/SettingsModal.tsx`、`README.md`、`agents.md` 无“同时采集”
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按新规则跳过）
+
+### 已知问题
+- 未做真机 UI 文案查看；需要下次设备验证时顺带确认设置页关于文案展示正常。
+
+### 下一步
+- 执行 Task 5：建立最小设备能力服务，将设置页硬编码能力入口收口到统一模型。
+
+---
+
+## 2026-04-25 升级记录（四）
+
+### 本次目标
+- 执行 Task 5：建立设备能力服务最小闭环，把设置页硬编码能力判断收口到统一模型。
+
+### 修改文件
+- `src/types/cameraCapabilities.ts`
+- `src/utils/cameraCapabilities.ts`
+- `src/screens/CameraShell.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `CameraCapabilities` 类型，覆盖闪光灯、照片格式、录像帧率、录像画质和录像编码能力。
+- 新增 `buildCameraCapabilities(device)`，从 VisionCamera `device` 派生基础能力对象。
+- 新增 `firstSupportedVideoQuality()`，用于旧设置或当前设置不可用时降级。
+- `CameraShell.tsx` 生成并传入 `capabilities`，并在设置加载后自动降级不支持的闪光灯、照片格式、帧率、画质和编码设置。
+- `SettingsModal.tsx` 改为通过 `capabilities` 禁用不可用选项，不再直接散落判断 `device.hasFlash` 等字段。
+- 新增能力服务单元测试，覆盖闪光灯、FPS、分辨率和默认降级画质。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按新规则跳过）
+- [ ] 前后摄切换后能力对象更新（待真机回归）
+- [ ] 旧设置不可用时自动降级（已做类型逻辑，待真机覆盖）
+
+### 已知问题
+- HEVC/H.264 编码能力当前仍按“未知则允许”处理，后续需要通过原生 MediaCodec 能力或转码失败统计补齐更精确判断。
+- 视频画质能力基于 `device.getSupportedResolutions('video')` 的单输出分辨率能力，仍不等价于多输出组合能力；实际 CameraX session 仍以运行时降级和错误保护为准。
+
+### 下一步
+- 进入后续 Phase 4 / Task：建立 Media Asset Index，把一次拍摄的主图、副图、视频变体按 `captureId` 成组。
