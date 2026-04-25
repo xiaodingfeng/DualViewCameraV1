@@ -45,6 +45,7 @@ import { buildReadyAsset, enrichGalleryMediaWithIndex } from '../utils/mediaInde
 import {
   createMediaJob,
   markStaleRunningJobs,
+  runQueuedMediaJob,
   updateMediaJobInList,
 } from '../utils/mediaJobQueue';
 import {
@@ -315,5 +316,27 @@ describe('media job queue helpers', () => {
     expect(recovered[1].status).toBe('failed');
     expect(recovered[2].status).toBe('succeeded');
     expect(recovered[0].errorMessage).toContain('后台任务未完成');
+  });
+
+  it('runs media jobs one at a time', async () => {
+    const events: string[] = [];
+    let releaseFirst = () => {};
+
+    const first = runQueuedMediaJob(async () => {
+      events.push('first-start');
+      await new Promise<void>(resolve => {
+        releaseFirst = resolve;
+      });
+      events.push('first-end');
+    });
+    const second = runQueuedMediaJob(async () => {
+      events.push('second-start');
+    });
+
+    await Promise.resolve();
+    expect(events).toEqual(['first-start']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(events).toEqual(['first-start', 'first-end', 'second-start']);
   });
 });

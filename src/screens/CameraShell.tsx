@@ -98,6 +98,7 @@ import {
   createMediaJob,
   loadMediaJobs,
   markStaleRunningJobs,
+  runQueuedMediaJob,
   saveMediaJobs,
   updateMediaJob,
   updateMediaJobInList,
@@ -1154,6 +1155,7 @@ function CameraShell({
               try {
                 setMediaJobs(previous => upsertMediaJobInList(previous, job));
                 await upsertMediaJob(job);
+                await runQueuedMediaJob(async () => {
                 await applyJobPatch({ status: 'running', progress: 0.08 });
                 const subVariant = saveSubFrameSpec.variant;
                 await applyJobPatch({ status: 'running', progress: 0.35 });
@@ -1192,6 +1194,7 @@ function CameraShell({
                     uri: subSaved.uri,
                     localPath: subSaved.localPath,
                   },
+                });
                 });
               } catch (error) {
                 await applyJobPatch({

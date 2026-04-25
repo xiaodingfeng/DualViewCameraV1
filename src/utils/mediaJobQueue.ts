@@ -12,6 +12,7 @@ type MediaJobFile = {
 };
 
 let writeChain: Promise<void> = Promise.resolve();
+let executionChain: Promise<void> = Promise.resolve();
 
 export function createMediaJob(input: {
   id?: string;
@@ -77,6 +78,15 @@ export async function updateMediaJob(
   const nextJobs = updateMediaJobInList(jobs, id, patch, now);
   await saveMediaJobs(nextJobs);
   return nextJobs;
+}
+
+export function runQueuedMediaJob<T>(runner: () => Promise<T>): Promise<T> {
+  const run = executionChain.then(runner, runner);
+  executionChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
 }
 
 export function upsertMediaJobInList(jobs: MediaJob[], job: MediaJob): MediaJob[] {

@@ -1774,3 +1774,34 @@ cd android
 
 ### 修复记录
 - 修复 `MediaJobIndicator` 完成态不会自动消失的问题：组件现在会在完成/失败态启动轻量定时刷新，让 `isVisibleMediaJob()` 的过期时间能够生效。
+
+---
+
+## 2026-04-25 升级记录（八）
+### 本次目标
+- 继续 Phase 5：把副画面视频后台生成接入串行执行器，避免多个媒体任务并发抢占转码资源。
+
+### 修改文件
+- `src/utils/mediaJobQueue.ts`
+- `src/screens/CameraShell.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `mediaJobQueue.ts` 新增 `runQueuedMediaJob()`，使用模块级 promise chain 保证媒体任务一次只运行一个。
+- 双画面录像的副画面视频生成现在先登记为 `queued`，再通过 `runQueuedMediaJob()` 进入执行阶段。
+- 保留主视频立即保存和入库逻辑，副视频排队或失败不影响主视频可用性。
+- 新增单元测试覆盖串行执行顺序，确保第二个任务不会在第一个任务结束前启动。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- 当前串行执行器是内存级队列，App 进程退出后不会恢复未执行任务；重启时仍会把未完成任务标记为失败。
+- 还没有 UI 层重试/取消入口。
+
+### 下一步
+- 将照片素材包生成接入 `MediaJobQueue`。
+- 为 Gallery 分组补充失败 asset 状态展示和后续重试入口。
