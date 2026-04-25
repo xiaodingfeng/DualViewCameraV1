@@ -2,7 +2,9 @@ import type { CameraDevice } from 'react-native-vision-camera';
 
 import { ASPECT_RATIOS, VIDEO_QUALITY_CONFIG } from '../config/camera';
 import type {
+  AspectRatioId,
   FrameOrientation,
+  PhotoVariant,
   VideoFps,
   VideoQuality,
   VisibleFrameSpec,
@@ -18,7 +20,11 @@ export function wait(ms: number): Promise<void> {
 
 export function visibleFrameSpec(
   orientation: FrameOrientation,
-  selectedAspect: (typeof ASPECT_RATIOS)[number],
+  selectedAspect: {
+    id: AspectRatioId;
+    previewAspect?: number;
+    photoVariant: PhotoVariant;
+  },
   fullPortraitAspect: number,
 ): VisibleFrameSpec {
   const isLandscape = orientation === 'landscape';

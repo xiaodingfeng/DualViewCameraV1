@@ -1500,3 +1500,40 @@ cd android
 ## 22. 一句话原则
 
 先把“同源双画面”的裁切、输出、媒体管理做成稳定的创作系统，最后再把“双摄并发”作为设备支持时可用的高级模式接入。当前阶段最重要的不是炫技，而是让用户每次按下快门都能稳定得到一组可直接分享的素材。
+
+---
+
+## 2026-04-25 升级记录
+
+### 本次目标
+- 按 Task 1 建立 Composition Engine 的类型、纯工具函数和测试护栏。
+- 不接入 `CameraShell.tsx`，不改变 UI、拍照、录像和保存行为。
+
+### 修改文件
+- `src/types/composition.ts`
+- `src/utils/composition.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `src/utils/camera.ts`
+- `__tests__/App.test.tsx`
+
+### 关键实现
+- 新增 `CompositionScene`、`CropSpec`、`CompositionOutputSpec` 等构图类型。
+- 新增 `buildCompositionScene()`，封装当前主/副显示方向、主/副保存方向和双输出启用规则。
+- 放宽 `visibleFrameSpec()` 入参类型，使其接收最小化 aspect option，便于纯工具复用。
+- 新增 Jest 测试覆盖 `visibleFrameSpec`、`calculateContainedFrame`、`videoFpsOptionsForQuality`、`videoTargetSizeForAspect`、`ensureVideoExtension`、settings 类型守卫和 `buildCompositionScene()`。
+- 为现有 `App.test.tsx` 补充 VisionCamera、RNFS、CameraRoll、Nitro 的轻量 mock，避免测试环境直接解析原生/ESM 包。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] `:app:assembleDebug`
+- [ ] 真机单画面拍照
+- [ ] 真机双画面拍照
+- [ ] 真机双画面录像
+
+### 已知问题
+- 首次执行 `:app:assembleDebug` 时 `:app:createBundleDebugJsAndAssets` 报 `index.android.bundle.hbc` 不存在；手动使用同一条 Hermes 命令生成缺失的 `.hbc` 后复跑 `:app:assembleDebug` 通过。后续若复现，应单独排查 RN Gradle Hermes bundle 任务在 Windows 下的输出文件时序。
+- 本轮只新增构图引擎和测试护栏，尚未用 `buildCompositionScene()` 替换 `CameraShell.tsx` 中的派生构图逻辑。
+
+### 下一步
+- 执行 Task 2：在 `CameraShell.tsx` 中接入 `buildCompositionScene()`，以 scene 输出替换现有 `mainFrameSpec`、`subFrameSpec`、`saveMainFrameSpec`、`saveSubFrameSpec` 派生逻辑，并保持行为不变。
