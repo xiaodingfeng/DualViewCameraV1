@@ -85,6 +85,7 @@ import {
 } from '../utils/camera';
 import {
   buildCameraCapabilities,
+  resolveDualViewVideoSettingsForStability,
   resolveSettingsForCapabilities,
 } from '../utils/cameraCapabilities';
 import { createCaptureId } from '../utils/captureId';
@@ -459,6 +460,25 @@ function CameraShell({
     videoFps,
     videoQuality,
   ]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+
+    const dualViewResolution = resolveDualViewVideoSettingsForStability({
+      viewMode,
+      videoFps,
+      videoQuality,
+    });
+    if (dualViewResolution.patch.videoFps != null) {
+      setVideoFps(dualViewResolution.patch.videoFps);
+    }
+    if (dualViewResolution.patch.videoQuality != null) {
+      setVideoQuality(dualViewResolution.patch.videoQuality);
+    }
+    if (dualViewResolution.message != null) {
+      setToast(dualViewResolution.message);
+    }
+  }, [settingsLoaded, videoFps, videoQuality, viewMode]);
 
   useEffect(() => {
     if (!settingsLoaded) return;

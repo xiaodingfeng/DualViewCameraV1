@@ -19,6 +19,11 @@ export interface CameraCapabilitySettingResolution {
   messages: string[];
 }
 
+export interface DualViewStabilityResolution {
+  patch: Partial<Pick<CameraCapabilitySettingState, 'videoFps' | 'videoQuality'>>;
+  message: string | null;
+}
+
 export function buildCameraCapabilities(
   device: CameraDevice | null,
 ): CameraCapabilities {
@@ -93,6 +98,32 @@ export function resolveSettingsForCapabilities(
   }
 
   return { patch, messages };
+}
+
+export function resolveDualViewVideoSettingsForStability(input: {
+  viewMode: 'single' | 'dual';
+  videoFps: VideoFps;
+  videoQuality: VideoQuality;
+}): DualViewStabilityResolution {
+  if (input.viewMode !== 'dual') {
+    return { patch: {}, message: null };
+  }
+
+  const patch: DualViewStabilityResolution['patch'] = {};
+  if (input.videoFps !== 30) {
+    patch.videoFps = 30;
+  }
+  if (input.videoQuality === '4K' || input.videoQuality === '8K') {
+    patch.videoQuality = '1080';
+  }
+
+  return {
+    patch,
+    message:
+      patch.videoFps != null || patch.videoQuality != null
+        ? '双画面模式为保证预览稳定，已切换到 1080P/30HZ'
+        : null,
+  };
 }
 
 function supportsHeifOutput(): boolean {

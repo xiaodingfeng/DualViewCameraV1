@@ -1923,6 +1923,34 @@ cd android
 ### 后续方向
 - 继续 Phase 7：把能力服务扩展到“双画面稳定性策略”，在双画面模式下对高风险规格做更明确的预览态/录制态降级提示。
 
+---
+
+## 2026-04-25 升级记录（十七）
+### 本次目标
+- 继续 Phase 7：补齐双画面模式下的高风险录像规格稳定性降级策略。
+
+### 修改文件
+- `src/utils/cameraCapabilities.ts`
+- `src/screens/CameraShell.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `resolveDualViewVideoSettingsForStability()`，把双画面模式下的 60HZ、4K、8K 录像设置收敛到更稳定的 1080P/30HZ。
+- `CameraShell` 在设置加载完成后监听 `viewMode`、`videoFps`、`videoQuality`，进入双画面或选择高风险规格时自动应用降级。
+- 降级时显示 Toast：`双画面模式为保证预览稳定，已切换到 1080P/30HZ`。
+- 单画面模式不受该策略影响，仍保留设备能力范围内的高规格选项。
+- 单元测试覆盖双画面降级和单画面不降级两条路径。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- Phase 7 已覆盖基础能力、不可用设置降级和双画面稳定性降级；下一阶段可进入 Phase 8 局部特写副画面前的真机回归准备。
+
 ### 已知问题
 - Gallery 目前只展示失败状态，还没有重试/取消按钮。
 - 失败任务仍依赖 `MediaJob` 记录，尚未写回 Media Asset Index 成为持久失败 asset。

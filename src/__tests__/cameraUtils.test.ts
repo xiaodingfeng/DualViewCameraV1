@@ -39,6 +39,7 @@ import { buildCompositionScene } from '../utils/composition';
 import {
   buildCameraCapabilities,
   firstSupportedVideoQuality,
+  resolveDualViewVideoSettingsForStability,
   resolveSettingsForCapabilities,
 } from '../utils/cameraCapabilities';
 import { ensureVideoExtension } from '../utils/gallery';
@@ -273,6 +274,24 @@ describe('camera capabilities', () => {
       videoCodec: 'h264',
     });
     expect(resolution.messages.length).toBeGreaterThan(0);
+  });
+
+  it('caps dual-view video settings to the stable preview envelope', () => {
+    expect(
+      resolveDualViewVideoSettingsForStability({
+        viewMode: 'dual',
+        videoFps: 60,
+        videoQuality: '4K',
+      }).patch,
+    ).toEqual({ videoFps: 30, videoQuality: '1080' });
+
+    expect(
+      resolveDualViewVideoSettingsForStability({
+        viewMode: 'single',
+        videoFps: 60,
+        videoQuality: '4K',
+      }).patch,
+    ).toEqual({});
   });
 });
 
