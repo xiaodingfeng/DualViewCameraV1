@@ -45,6 +45,7 @@ import {
   buildFailedAsset,
   buildReadyAsset,
   enrichGalleryMediaWithIndex,
+  upsertCaptureGroup,
 } from '../utils/mediaIndex';
 import {
   createMediaJob,
@@ -307,6 +308,90 @@ describe('media index helpers', () => {
     expect(item.captureStatus).toBe('failed');
     expect(item.errorMessage).toBe('副画面视频后台处理失败');
     expect(item.type).toBe('video');
+  });
+
+  it('hides stale failed assets when the same role has a ready asset', () => {
+    const failedAsset = buildFailedAsset({
+      captureId: 'cap_cleanup',
+      createdAt: 2000,
+      type: 'photo',
+      role: 'sub',
+      aspect: '16:9',
+      sourceUri: '/tmp/source.jpg',
+      errorMessage: '副画面照片生成失败',
+    });
+    const readyAsset = buildReadyAsset({
+      captureId: 'cap_cleanup',
+      createdAt: 2200,
+      type: 'photo',
+      role: 'sub',
+      aspect: '16:9',
+      uri: 'content://media/sub-ready',
+      localPath: '/storage/DCIM/DualViewCamera/sub-ready.jpg',
+    });
+
+    const items = enrichGalleryMediaWithIndex([], [
+      {
+        captureId: 'cap_cleanup',
+        createdAt: 2000,
+        mode: 'dual',
+        outputPackId: 'dual-main-sub',
+        assets: [failedAsset, readyAsset],
+      },
+    ]);
+
+    expect(items).toEqual([]);
+  });
+
+  it('removes stale failed assets from the persisted index after success', async () => {
+    const RNFS = require('react-native-fs');
+    let exists = false;
+    let saved = '';
+    RNFS.exists.mockImplementation(() => Promise.resolve(exists));
+    RNFS.readFile.mockImplementation(() => Promise.resolve(saved));
+    RNFS.writeFile.mockImplementation((_: string, data: string) => {
+      saved = data;
+      exists = true;
+      return Promise.resolve();
+    });
+
+    const failedAsset = buildFailedAsset({
+      captureId: 'cap_persisted_cleanup',
+      createdAt: 2000,
+      type: 'video',
+      role: 'sub',
+      aspect: '16:9',
+      sourceUri: '/tmp/source.mp4',
+      errorMessage: '副画面视频生成失败',
+    });
+    const readyAsset = buildReadyAsset({
+      captureId: 'cap_persisted_cleanup',
+      createdAt: 2200,
+      type: 'video',
+      role: 'sub',
+      aspect: '16:9',
+      uri: 'content://media/sub-ready-video',
+      localPath: '/storage/DCIM/DualViewCamera/sub-ready-video.mp4',
+    });
+
+    await upsertCaptureGroup({
+      captureId: 'cap_persisted_cleanup',
+      createdAt: 2000,
+      mode: 'dual',
+      outputPackId: 'dual-main-sub',
+      assets: [failedAsset],
+    });
+    await upsertCaptureGroup({
+      captureId: 'cap_persisted_cleanup',
+      createdAt: 2200,
+      mode: 'dual',
+      outputPackId: 'dual-main-sub',
+      assets: [readyAsset],
+    });
+
+    const parsed = JSON.parse(saved);
+    expect(parsed.groups[0].assets).toHaveLength(1);
+    expect(parsed.groups[0].assets[0].status).toBe('ready');
   });
 });
 

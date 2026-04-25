@@ -1936,3 +1936,32 @@ cd android
 
 ### 下一步
 - 为 Media Asset Index 增加清理策略：当同角色 ready asset 存在时，合并时移除旧 failed asset。
+
+---
+
+## 2026-04-25 升级记录（十三）
+### 本次目标
+- 最后一次收口 Media Asset 失败策略；本轮结束后不再继续深入失败任务/索引体系，后续切回主线功能开发。
+
+### 修改文件
+- `src/utils/mediaIndex.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `mediaIndex.ts` 新增索引资产状态清理：同一 capture group 内同一 role 只要存在 `ready` asset，就移除该 role 的旧 `failed` asset。
+- 清理逻辑同时作用于 `upsertCaptureGroup()` 合并路径和 `loadMediaIndex()` 归一化路径。
+- 保留 Gallery 展示层的失败占位逻辑，但成功资产出现后，索引层也会逐步清掉旧失败项，不再只靠 UI 隐藏。
+- 新增单元测试覆盖：
+  - 同角色 ready asset 存在时不再生成 failed Gallery 占位。
+  - failed asset 先写入、ready asset 后写入时，持久化索引最终只保留 ready asset。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- Media Asset 失败策略到此收口。
+- 后续任务回到主线功能开发，不再继续扩展失败任务体系，除非后续真机验证暴露明确 bug。

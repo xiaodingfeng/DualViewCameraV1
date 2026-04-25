@@ -157,7 +157,11 @@ function mergeGroup(
   incoming: DualCaptureGroup,
 ): DualCaptureGroup[] {
   const existing = groups.find(group => group.captureId === incoming.captureId);
-  if (!existing) return [incoming, ...groups];
+  const normalizedIncoming = {
+    ...incoming,
+    assets: reconcileAssetStatuses(incoming.assets),
+  };
+  if (!existing) return [normalizedIncoming, ...groups];
 
   const assets = new Map<string, DualMediaAsset>();
   [...existing.assets, ...incoming.assets].forEach(asset => {
@@ -168,8 +172,8 @@ function mergeGroup(
     group.captureId === incoming.captureId
       ? {
           ...existing,
-          ...incoming,
-          assets: Array.from(assets.values()).sort(
+          ...normalizedIncoming,
+          assets: reconcileAssetStatuses(Array.from(assets.values())).sort(
             (a, b) => roleSort(a.role) - roleSort(b.role),
           ),
         }
@@ -182,9 +186,20 @@ function normalizeGroups(groups: DualCaptureGroup[]): DualCaptureGroup[] {
     .filter(group => group?.captureId && Array.isArray(group.assets))
     .map(group => ({
       ...group,
-      assets: group.assets.filter(asset => asset?.id && asset?.uri),
+      assets: reconcileAssetStatuses(group.assets.filter(asset => asset?.id && asset?.uri)),
     }))
     .filter(group => group.assets.length > 0);
+}
+
+function reconcileAssetStatuses(assets: DualMediaAsset[]): DualMediaAsset[] {
+  const readyRoles = new Set(
+    assets
+      .filter(asset => asset.status === 'ready')
+      .map(asset => asset.role),
+  );
+  return assets.filter(
+    asset => !(asset.status === 'failed' && readyRoles.has(asset.role)),
+  );
 }
 
 function assetKeys(asset: DualMediaAsset): string[] {
