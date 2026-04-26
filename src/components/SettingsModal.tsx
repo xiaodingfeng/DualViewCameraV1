@@ -12,6 +12,7 @@ import {
 import { COVER_TEMPLATE_IDS, COVER_TEMPLATE_LABELS } from '../config/coverTemplates';
 import { styles } from '../styles/cameraStyles';
 import type { CoverTemplateSettings } from '../types/coverTemplate';
+import type { ConcurrentCameraCapability } from '../types/concurrentCamera';
 import type {
   FlashMode,
   PhotoFormat,
@@ -33,6 +34,7 @@ function SettingsModal({
   devicesCount,
   capabilities,
   coverTemplate,
+  concurrentCameraCapability,
   flashMode,
   onClose,
   onCoverTemplateChange,
@@ -63,6 +65,7 @@ function SettingsModal({
   devicesCount: number;
   capabilities: CameraCapabilities;
   coverTemplate: CoverTemplateSettings;
+  concurrentCameraCapability: ConcurrentCameraCapability | null;
   flashMode: FlashMode;
   onClose: () => void;
   onCoverTemplateChange: (value: CoverTemplateSettings) => void;
@@ -275,6 +278,16 @@ function SettingsModal({
                   <Text style={styles.settingLine}>镜头数量：{devicesCount}</Text>
                   <Text style={styles.settingLine}>缩放范围：{device?.minZoom?.toFixed(1)}x ~ {device?.maxZoom?.toFixed(1)}x</Text>
                 </SettingsSection>
+                {__DEV__ ? (
+                  <SettingsSection title="双摄并发实验">
+                    <Text style={styles.settingLine}>{concurrentCameraStatusText(concurrentCameraCapability)}</Text>
+                    {concurrentCameraCapability?.pairs.map(pair => (
+                      <Text key={pair.id} style={styles.settingLine}>
+                        {pair.primaryFacing}:{pair.primaryCameraId} + {pair.secondaryFacing}:{pair.secondaryCameraId}
+                      </Text>
+                    ))}
+                  </SettingsSection>
+                ) : null}
               </>
             )}
             <View style={{ height: 40 }} />
@@ -320,6 +333,23 @@ const PREVIEW_LAYOUT_TEMPLATES: Array<{ id: PreviewLayoutTemplateId; label: stri
   { id: 'split-vertical', label: '上下分屏' },
   { id: 'stack', label: '主图+副条' },
 ];
+
+function concurrentCameraStatusText(capability: ConcurrentCameraCapability | null): string {
+  if (capability == null) return '正在探测设备并发相机能力';
+  if (capability.supported) return `当前设备发现 ${capability.pairs.length} 组并发相机组合，仅用于实验验证`;
+  switch (capability.reason) {
+    case 'api-too-low':
+      return '当前 Android 版本不支持并发相机探测';
+    case 'feature-missing':
+      return '当前设备未声明系统并发相机能力';
+    case 'no-camera-pairs':
+      return '系统未返回可用并发相机组合';
+    case 'camerax-unavailable':
+      return 'CameraX 并发能力暂不可用';
+    default:
+      return '并发相机能力探测失败';
+  }
+}
 
 function RoundButton({ active = false, label, onPress, style, children }: { active?: boolean; label: string; onPress: () => void; style?: any; children?: React.ReactNode }) {
   return <Pressable style={[styles.roundButton, active && styles.roundButtonActive, style]} onPress={onPress}>{children ? children : <Text style={styles.roundButtonText}>{label}</Text>}</Pressable>;

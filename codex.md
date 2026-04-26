@@ -1833,6 +1833,38 @@ cd android
 
 ---
 
+## 2026-04-26 升级记录（Phase 10 能力探测启动）
+### 本次目标
+- 不继续 Phase 9 的非功能性细节，开始 Phase 10 的双摄并发能力探测。
+- 本阶段只做 Debug 隐藏实验，不进入普通拍摄主路径。
+
+### 修改文件
+- `android/app/src/main/java/com/dualviewcamerav1init/DualViewCameraPackage.kt`
+- `android/app/src/main/java/com/dualviewcamerav1init/concurrent/ConcurrentCameraModule.kt`
+- `src/native/concurrentCamera.ts`
+- `src/types/concurrentCamera.ts`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `codex.md`
+
+### 关键实现
+- 新增 `ConcurrentCameraModule`，通过 Android `CameraManager.concurrentCameraIds` 探测系统声明的并发相机组合。
+- 探测结果只返回支持状态、失败原因、相机 ID、镜头朝向和最小可用 use case，不绑定 CameraX 会话，不影响当前 VisionCamera 主链路。
+- JS 侧新增 `getConcurrentCameraCapability()` 包装，原生模块缺失或异常时稳定返回 `unknown-error`。
+- 设置页“关于”页仅在 `__DEV__` 下显示“双摄并发实验”探测结果，普通用户路径不可见。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+
+### 下一步
+- Phase 10 后续只推进独立 Native 预览实验，仍不接入普通拍照、录像入口。
+- 若设备不声明并发相机能力，则后续入口保持隐藏并回退同源双画面。
+
+---
+
 ## 2026-04-26 升级记录（Phase 9 封面元数据）
 ### 本次目标
 - 继续 Phase 9，补齐封面标题和模板信息在 Media Asset Index 与 Gallery 详情页之间的传递。

@@ -47,8 +47,10 @@ import {
 import { GalleryView } from '../components/GalleryModal';
 import { MediaJobIndicator } from '../components/MediaJobIndicator';
 import { SettingsModal } from '../components/SettingsModal';
+import { getConcurrentCameraCapability } from '../native/concurrentCamera';
 import { DualViewMedia } from '../native/dualViewMedia';
 import type { CoverTemplateSettings } from '../types/coverTemplate';
+import type { ConcurrentCameraCapability } from '../types/concurrentCamera';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DEFAULT_PIP_LAYOUT: PipLayoutConfig = {
@@ -249,12 +251,28 @@ function CameraShell({
   const [galleryItems, setGalleryItems] = useState<GalleryMedia[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
+  const [concurrentCameraCapability, setConcurrentCameraCapability] =
+      useState<ConcurrentCameraCapability | null>(null);
 
   useEffect(() => {
     if (captureLocation.hasPermission || hasRequestedLocationPermissionRef.current) return;
     hasRequestedLocationPermissionRef.current = true;
     captureLocation.requestPermission().catch(() => {});
   }, [captureLocation]);
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    getConcurrentCameraCapability()
+        .then(setConcurrentCameraCapability)
+        .catch(() =>
+          setConcurrentCameraCapability({
+            supported: false,
+            reason: 'unknown-error',
+            pairs: [],
+          }),
+        );
+  }, []);
+
   const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -2001,6 +2019,7 @@ function CameraShell({
             device={device}
             devicesCount={devicesCount}
             capabilities={capabilities}
+            concurrentCameraCapability={concurrentCameraCapability}
             flashMode={flashMode}
             onClose={() => setSettingsOpen(false)}
             onFlashModeChange={setFlashMode}
