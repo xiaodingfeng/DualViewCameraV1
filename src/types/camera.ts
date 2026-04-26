@@ -1,4 +1,5 @@
 import type { ViewProps } from 'react-native';
+import type { CoverTemplateSettings } from './coverTemplate';
 
 export type CaptureMode = 'photo' | 'video';
 export type ViewMode = 'single' | 'dual';
@@ -55,6 +56,7 @@ export type PersistedSettings = Partial<{
   safetyOverlayMode: SafetyOverlayMode;
   pipLayout: PipLayoutConfig;
   previewLayoutTemplate: PreviewLayoutTemplateId;
+  coverTemplate: CoverTemplateSettings;
 }>;
 
 export type NativeVideoViewProps = ViewProps & { sourceUri: string };

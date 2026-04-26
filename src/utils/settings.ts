@@ -1,6 +1,7 @@
 import RNFS from 'react-native-fs';
 
 import { SETTINGS_PATH } from '../config/camera';
+import type { CoverTemplateId, CoverTemplateSettings } from '../types/coverTemplate';
 import type {
   AspectRatioId,
   PersistedSettings,
@@ -73,6 +74,20 @@ export function isPipScale(value: unknown): value is PipScale {
 
 export function isPreviewLayoutTemplateId(value: unknown): value is PreviewLayoutTemplateId {
   return value === 'pip' || value === 'split-horizontal' || value === 'split-vertical' || value === 'stack';
+}
+
+export function isCoverTemplateId(value: unknown): value is CoverTemplateId {
+  return value === 'none' || value === 'clean-date' || value === 'dual-card' || value === 'vlog-title';
+}
+
+export function isCoverTemplateSettings(value: unknown): value is CoverTemplateSettings {
+  if (value == null || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    isCoverTemplateId(candidate.templateId) &&
+    typeof candidate.dateWatermarkEnabled === 'boolean' &&
+    typeof candidate.infoWatermarkEnabled === 'boolean'
+  );
 }
 
 export function isPipLayoutConfig(value: unknown): value is PipLayoutConfig {

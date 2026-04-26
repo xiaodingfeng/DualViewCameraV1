@@ -47,6 +47,7 @@ import { GalleryView } from '../components/GalleryModal';
 import { MediaJobIndicator } from '../components/MediaJobIndicator';
 import { SettingsModal } from '../components/SettingsModal';
 import { DualViewMedia } from '../native/dualViewMedia';
+import type { CoverTemplateSettings } from '../types/coverTemplate';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DEFAULT_PIP_LAYOUT: PipLayoutConfig = {
@@ -56,6 +57,11 @@ const DEFAULT_PIP_LAYOUT: PipLayoutConfig = {
   marginY: 228,
 };
 const DEFAULT_PREVIEW_LAYOUT_TEMPLATE: PreviewLayoutTemplateId = 'pip';
+const DEFAULT_COVER_TEMPLATE: CoverTemplateSettings = {
+  templateId: 'none',
+  dateWatermarkEnabled: true,
+  infoWatermarkEnabled: true,
+};
 import { styles } from '../styles/cameraStyles';
 import type {
   AspectRatioId,
@@ -90,6 +96,7 @@ import {
 } from '../utils/cameraCapabilities';
 import { createCaptureId } from '../utils/captureId';
 import { buildCompositionScene } from '../utils/composition';
+import { createCoverForPhoto } from '../utils/coverGenerator';
 import {
   cameraRollNodeToGalleryMedia,
   createDualPhotoVariantsForAspects,
@@ -120,6 +127,7 @@ import {
 import type { DualMediaAsset } from '../types/mediaAsset';
 import {
   isAspectRatioId,
+  isCoverTemplateSettings,
   isPhotoFormat,
   isPipLayoutConfig,
   isPreviewLayoutTemplateId,
@@ -163,6 +171,7 @@ function CameraShell({
   const [previewLayoutTemplate, setPreviewLayoutTemplate] = useState<PreviewLayoutTemplateId>(
     DEFAULT_PREVIEW_LAYOUT_TEMPLATE,
   );
+  const [coverTemplate, setCoverTemplate] = useState<CoverTemplateSettings>(DEFAULT_COVER_TEMPLATE);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -424,6 +433,7 @@ function CameraShell({
           if (isPreviewLayoutTemplateId(settings.previewLayoutTemplate)) {
             setPreviewLayoutTemplate(settings.previewLayoutTemplate);
           }
+          if (isCoverTemplateSettings(settings.coverTemplate)) setCoverTemplate(settings.coverTemplate);
         })
         .finally(() => {
           if (!cancelled) setSettingsLoaded(true);
@@ -496,8 +506,10 @@ function CameraShell({
       shutterSoundEnabled,
       pipLayout,
       previewLayoutTemplate,
+      coverTemplate,
     }).catch(() => {});
   }, [
+    coverTemplate,
     pipLayout,
     photoFormat,
     photoQuality,
@@ -956,6 +968,44 @@ function CameraShell({
       [saveDualOutputs, viewMode],
   );
 
+  const createAndSaveCoverAsset = useCallback(
+      async (input: {
+        captureId: string;
+        createdAt: number;
+        dual: boolean;
+        mainLocalPath: string;
+        sourceUri: string;
+      }): Promise<DualMediaAsset | null> => {
+        if (coverTemplate.templateId === 'none') return null;
+        try {
+          const coverPath = await createCoverForPhoto({
+            sourcePath: input.mainLocalPath,
+            settings: coverTemplate,
+            title: input.dual ? 'Dual View' : 'Agile',
+            infoText: `${selectedAspectId} ${input.dual ? 'Dual' : 'Single'}`,
+            createdAt: input.createdAt,
+          });
+          if (coverPath == null) return null;
+          const coverSaved = await saveToGallery(coverPath, 'photo', '封面');
+          return buildReadyAsset({
+            captureId: input.captureId,
+            createdAt: input.createdAt,
+            type: 'cover',
+            role: 'cover',
+            aspect: '16:9',
+            uri: coverSaved.uri,
+            localPath: coverSaved.localPath,
+            sourceUri: input.sourceUri,
+            templateId: coverTemplate.templateId,
+          });
+        } catch (error) {
+          setToast(cameraErrorMessage(error, '封面生成失败'));
+          return null;
+        }
+      },
+      [coverTemplate, saveToGallery, selectedAspectId, setToast],
+  );
+
   const saveCapturedPhotoInBackground = useCallback(
       (
           filePath: string,
@@ -1015,6 +1065,13 @@ function CameraShell({
                 saveToGallery(mainPath, 'photo', '主画面'),
                 saveToGallery(subPath, 'photo', '副画面'),
               ]);
+              const coverAsset = await createAndSaveCoverAsset({
+                captureId,
+                createdAt,
+                dual: true,
+                mainLocalPath: mainSaved.localPath ?? mainPath,
+                sourceUri: filePath,
+              });
               await applyJobPatch({ status: 'running', progress: 0.78 });
               await saveCaptureGroupToIndex({
                 captureId,
@@ -1040,6 +1097,7 @@ function CameraShell({
                     localPath: subSaved.localPath,
                     sourceUri: filePath,
                   }),
+                  ...(coverAsset ? [coverAsset] : []),
                 ],
               });
               await applyJobPatch({
@@ -1063,6 +1121,13 @@ function CameraShell({
               await applyJobPatch({ status: 'running', progress: 0.55 });
               await applyJobPatch({ status: 'running', progress: 0.82 });
               const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
+              const coverAsset = await createAndSaveCoverAsset({
+                captureId,
+                createdAt,
+                dual: false,
+                mainLocalPath: mainSaved.localPath ?? mainPath,
+                sourceUri: filePath,
+              });
               await saveCaptureGroupToIndex({
                 captureId,
                 createdAt,
@@ -1077,6 +1142,7 @@ function CameraShell({
                     localPath: mainSaved.localPath,
                     sourceUri: filePath,
                   }),
+                  ...(coverAsset ? [coverAsset] : []),
                 ],
               });
               await applyJobPatch({
@@ -1114,7 +1180,7 @@ function CameraShell({
           }
         })();
       },
-      [saveCaptureGroupToIndex, saveToGallery, selectedAspectId, setMediaJobs],
+      [createAndSaveCoverAsset, saveCaptureGroupToIndex, saveToGallery, selectedAspectId, setMediaJobs],
   );
 
   const prepareFlashForPhoto = useCallback(async () => {
@@ -1924,6 +1990,8 @@ function CameraShell({
             saveDualOutputs={saveDualOutputs}
             safetyOverlayMode={safetyOverlayMode}
             onSafetyOverlayModeChange={setSafetyOverlayMode}
+            coverTemplate={coverTemplate}
+            onCoverTemplateChange={setCoverTemplate}
             previewLayoutTemplate={previewLayoutTemplate}
             onPreviewLayoutTemplateChange={setPreviewLayoutTemplate}
             setSaveDualOutputs={setSaveDualOutputs}

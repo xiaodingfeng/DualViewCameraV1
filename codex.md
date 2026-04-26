@@ -224,7 +224,7 @@ android/app/src/main/java/com/dualviewcamerav1init/
 - 双画面录像副画面后台处理只有轻量提示，缺少任务队列、进度、失败重试。
 - 设置页仍偏功能枚举，缺少按设备能力动态显隐的统一能力服务。
 - PiP 位置和布局模板还不够可玩，目前更像固定画中画。
-- 裁切安全框 / 多平台输出包 / 局部特写尚未产品化。
+- 裁切安全框 / 多平台输出包 / 封面水印模板尚未产品化。
 
 ---
 
@@ -240,9 +240,9 @@ android/app/src/main/java/com/dualviewcamerav1init/
 2. **Media Asset Index**：将一次拍摄的主图、副图、原始源文件、封面、视频变体组织成一个 `captureId`。
 3. **Media Job Queue**：照片裁切、视频转码、相册入库、封面生成后台任务化。
 4. **Safety Overlay**：显示真实成片安全框和裁切遮罩，降低构图误解。
-5. **Template System**：支持 PiP、左右分屏、上下分屏、多平台素材包、局部特写。
+5. **Template System**：支持 PiP、左右分屏、上下分屏、多平台素材包、封面水印。
 6. **Capability Service**：按设备能力动态显示设置和降级输出。
-7. **Creative Modes**：多平台素材包、局部特写、封面、水印、Vlog 模板。
+7. **Creative Modes**：多平台素材包、封面、水印、Vlog 模板。
 
 ---
 
@@ -258,7 +258,6 @@ android/app/src/main/java/com/dualviewcamerav1init/
 | Phase 5 | P1 | Media Job Queue | 视频/图片处理任务化、可提示、可重试 |
 | Phase 6 | P1 | PiP 可拖拽与模板化布局 | 增强创作可玩性 |
 | Phase 7 | P1 | 设备能力服务 | 设置页动态能力显隐与安全降级 |
-| Phase 8 | P2 | 局部特写副画面 | 同源双画面差异化能力 |
 | Phase 9 | P2 | 封面与水印模板 | 提升分享完成度 |
 | Phase 10 | P2 | 双摄并发能力探测与实验隔离 | 先验证设备支持、CameraX API、独立 Native View，不进入主路径 |
 | Phase 11 | P2/P3 | 双摄并发产品化支持 | 在最后阶段支持前后摄并发拍摄、预览、保存与降级回退 |
@@ -320,8 +319,7 @@ export type CompositionLayoutId =
   | 'pip'
   | 'split-horizontal'
   | 'split-vertical'
-  | 'stack'
-  | 'detail-zoom';
+  | 'stack';
 
 export type CompositionOutputKind = 'photo' | 'video' | 'cover';
 
@@ -820,68 +818,13 @@ export interface CameraCapabilities {
 
 ---
 
-## 12. Phase 8：局部特写副画面
+## 12. Phase 9：封面与水印模板
 
 ### 12.1 目标
 
-利用同源裁切优势，新增“主画面全景 + 副画面局部放大”模式。
-
-### 12.2 功能定义
-
-新增布局：`detail-zoom`
-
-- 主画面：完整构图。
-- 副画面：从同一源画面中裁切局部区域，显示 2x 或 3x 特写。
-- 用户可拖动副画面取景区域。
-- 保存时输出：
-  - 主画面照片。
-  - 局部特写照片。
-
-### 12.3 新增类型
-
-```ts
-export interface DetailZoomConfig {
-  zoomScale: 2 | 3 | 4;
-  normalizedCenterX: number;
-  normalizedCenterY: number;
-}
-```
-
-### 12.4 实现阶段
-
-第一阶段：静态中心特写
-
-- [ ] 副画面固定显示中心 2x 裁切。
-- [ ] 保存副图时按中心 2x 区域裁切。
-
-第二阶段：可移动特写区域
-
-- [ ] 主画面增加一个可拖动的小框，表示特写区域。
-- [ ] 副画面实时显示该区域。
-- [ ] 取景区域归一化保存到 settings。
-
-### 12.5 技术注意
-
-- 不要用高频 JS 截帧实现实时副画面。
-- 预览可以先复用同源第二 PreviewOutput，仅改变容器裁切和 transform。
-- 保存必须走原生裁切，保证输出质量。
-
-### 12.6 验收标准
-
-- [ ] `detail-zoom` 模式下主画面和副画面明显不同。
-- [ ] 副画面特写保存结果和预览基本一致。
-- [ ] 不影响普通 PiP 模式。
-- [ ] 不出现 Worklets 相关依赖或红屏。
-
----
-
-## 13. Phase 9：封面与水印模板
-
-### 13.1 目标
-
 为拍摄内容自动生成可分享封面，增强“拍完即分享”。
 
-### 13.2 第一批能力
+### 12.2 第一批能力
 
 - [ ] 自动生成双画面拼贴封面。
 - [ ] 支持日期水印。
@@ -889,7 +832,7 @@ export interface DetailZoomConfig {
 - [ ] 支持简单标题：用户可在 Gallery 中编辑。
 - [ ] 封面保存为独立 `cover` asset，加入 capture group。
 
-### 13.3 新增文件
+### 12.3 新增文件
 
 ```text
 src/types/coverTemplate.ts
@@ -898,7 +841,7 @@ src/utils/coverGenerator.ts
 src/components/CoverEditor.tsx
 ```
 
-### 13.4 初始模板
+### 12.4 初始模板
 
 ```ts
 export type CoverTemplateId =
@@ -908,13 +851,13 @@ export type CoverTemplateId =
   | 'vlog-title';
 ```
 
-### 13.5 实现策略
+### 12.5 实现策略
 
 - 第一版优先用 React Native SVG 或原生 Bitmap 合成。
 - 如果依赖过重，不新增大体积第三方库。
 - 先支持照片封面，视频封面可后续从主视频第一帧或主图生成。
 
-### 13.6 验收标准
+### 12.6 验收标准
 
 - [ ] 拍照后能生成封面图。
 - [ ] 封面进入 Gallery group。
@@ -1327,9 +1270,8 @@ Codex 执行时建议严格按以下顺序小步提交：
 14. `CameraShell.tsx` 逐步迁移保存 / 转码逻辑
 15. `compositionTemplates.ts` 和模板 UI
 16. `cameraCapabilities.ts` 能力服务
-17. 局部特写
-18. 封面水印
-19. 实验真双摄
+17. 封面水印
+18. 实验真双摄
 
 ---
 
@@ -1493,7 +1435,6 @@ cd android
 - [ ] PiP 可拖动、可吸附、可保存位置。
 - [ ] 可切换至少 3 种布局模板。
 - [ ] 设置页按设备能力动态显示选项。
-- [ ] 局部特写模式可用。
 - [ ] 封面 / 水印至少有一个可用模板。
 - [ ] 支持设备上可启用前后双摄并发拍照。
 - [ ] 支持设备上可启用前后双摄双路录像，至少 720p / 30fps。
@@ -1864,6 +1805,58 @@ cd android
 
 ---
 
+## 2026-04-26 Bugfix 记录（封面水印遮罩）
+### 问题
+- 封面图底部使用半透明遮罩承载标题和水印，遮挡了原始画面内容。
+
+### 修复
+- 移除封面图半透明底部遮罩，不再用矩形覆盖画面。
+- 保留模板强调线、标题、日期水印和参数水印。
+- 文字改为使用轻量阴影提升可读性，避免用大面积遮罩压暗画面。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+
+---
+
+## 2026-04-26 升级记录（Phase 9 启动）
+### 本次目标
+- 按主线移除已废弃的中间阶段模块说明。
+- 启动 Phase 9：封面与水印模板，先覆盖照片封面生成和 capture group 入库。
+
+### 修改文件
+- `src/types/composition.ts`
+- `src/types/coverTemplate.ts`
+- `src/config/coverTemplates.ts`
+- `src/utils/coverGenerator.ts`
+- `src/utils/mediaIndex.ts`
+- `src/utils/settings.ts`
+- `src/types/camera.ts`
+- `src/native/dualViewMedia.ts`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `android/app/src/main/java/com/dualviewcamerav1init/DualViewMediaModule.kt`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `CompositionLayoutId` 只保留当前可用布局，文档不再规划已废弃的特写副画面能力。
+- 新增封面模板设置：关闭、日期封面、双画面卡片、Vlog 标题。
+- 设置页新增封面水印入口，可切换模板、日期水印、参数水印。
+- 拍照后台任务在主图保存后尝试生成 `cover` asset，并写入同一个 capture group。
+- Android 原生新增 Bitmap 封面合成，输出 16:9 JPG，失败不影响主图保存。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+
+---
+
 ## 2026-04-25 升级记录（十五）
 ### 本次目标
 - 继续 Phase 6：补齐第一批双画面预览布局模板切换入口。
@@ -1949,7 +1942,7 @@ cd android
 - [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
 
 ### 后续方向
-- Phase 7 已覆盖基础能力、不可用设置降级和双画面稳定性降级；下一阶段可进入 Phase 8 局部特写副画面前的真机回归准备。
+- Phase 7 已覆盖基础能力、不可用设置降级和双画面稳定性降级；已废弃的中间阶段不再进入主线，下一阶段进入 Phase 9 封面与水印模板。
 
 ### 已知问题
 - Gallery 目前只展示失败状态，还没有重试/取消按钮。

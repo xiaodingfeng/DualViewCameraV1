@@ -3,7 +3,12 @@ package com.dualviewcamerav1init
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -335,6 +340,49 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
+  @ReactMethod
+  fun createWatermarkedCover(
+      sourcePath: String,
+      suffix: String,
+      title: String,
+      dateText: String,
+      infoText: String,
+      templateId: String,
+      promise: Promise
+  ) {
+    try {
+      val source = File(sourcePath.removePrefix("file://"))
+      if (!source.exists()) {
+        promise.reject("ENOENT", "Source cover photo does not exist: ${source.absolutePath}")
+        return
+      }
+
+      val decoded = BitmapFactory.decodeFile(source.absolutePath)
+      if (decoded == null) {
+        promise.reject("EDECODE", "Unable to decode source cover photo: ${source.absolutePath}")
+        return
+      }
+
+      val upright = applyExifOrientation(decoded, source.absolutePath)
+      val cover = drawCoverBitmap(upright, title, dateText, infoText, templateId)
+      val target = File(
+          reactContext.cacheDir,
+          "DualViewCamera_cover_${safeSuffix(suffix)}_${safeSuffix(templateId)}_${System.currentTimeMillis()}.jpg"
+      )
+      FileOutputStream(target).use { output ->
+        cover.compress(Bitmap.CompressFormat.JPEG, 94, output)
+      }
+
+      if (decoded !== upright) decoded.recycle()
+      upright.recycle()
+      cover.recycle()
+
+      promise.resolve(target.absolutePath)
+    } catch (error: Throwable) {
+      promise.reject("ECOVER", error.message, error)
+    }
+  }
+
   private fun createPhotoVariantInternal(sourcePath: String, targetAspect: Double, variantLabel: String, suffix: String, format: String, quality: Int = 94, promise: Promise, mirror: Boolean = false, rotateLandscapeFallback: Boolean = false) {
     try {
       val source = File(sourcePath.removePrefix("file://"))
@@ -649,6 +697,63 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     val left = ((sourceWidth - cropWidth) / 2).coerceAtLeast(0)
     val top = ((sourceHeight - cropHeight) / 2).coerceAtLeast(0)
     return Bitmap.createBitmap(source, left, top, cropWidth, cropHeight)
+  }
+
+  private fun drawCoverBitmap(
+      source: Bitmap,
+      title: String,
+      dateText: String,
+      infoText: String,
+      templateId: String
+  ): Bitmap {
+    val width = 1280
+    val height = 720
+    val target = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(target)
+    val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    val cropped = centerCrop(source, width.toDouble() / height.toDouble())
+
+    canvas.drawColor(Color.rgb(8, 10, 12))
+    canvas.drawBitmap(cropped, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), bitmapPaint)
+
+    val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = when (templateId) {
+        "vlog-title" -> Color.rgb(255, 209, 102)
+        "dual-card" -> Color.rgb(122, 162, 255)
+        else -> Color.WHITE
+      }
+      strokeWidth = 6f
+    }
+    canvas.drawLine(54f, height - 154f, 150f, height - 154f, accentPaint)
+
+    val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      textSize = 56f
+      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      setShadowLayer(8f, 0f, 3f, Color.argb(180, 0, 0, 0))
+    }
+    val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(220, 255, 255, 255)
+      textSize = 28f
+      typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+      setShadowLayer(6f, 0f, 2f, Color.argb(180, 0, 0, 0))
+    }
+
+    val displayTitle = title.ifBlank {
+      if (templateId == "vlog-title") "VLOG" else "Dual View"
+    }
+    canvas.drawText(displayTitle.take(28), 54f, height - 96f, titlePaint)
+    if (dateText.isNotBlank()) {
+      canvas.drawText(dateText.take(24), 54f, height - 48f, metaPaint)
+    }
+    if (infoText.isNotBlank()) {
+      val displayInfo = infoText.take(32)
+      val textWidth = metaPaint.measureText(displayInfo)
+      canvas.drawText(displayInfo, width - textWidth - 54f, height - 48f, metaPaint)
+    }
+
+    if (cropped !== source) cropped.recycle()
+    return target
   }
 
   private fun orientBitmapForTargetAspect(source: Bitmap, targetAspect: Double, rotateLandscapeFallback: Boolean): Bitmap {

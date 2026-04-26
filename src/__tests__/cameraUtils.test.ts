@@ -57,6 +57,8 @@ import {
 } from '../utils/mediaJobQueue';
 import {
   isAspectRatioId,
+  isCoverTemplateId,
+  isCoverTemplateSettings,
   isPipLayoutConfig,
   isPreviewLayoutTemplateId,
   isPhotoFormat,
@@ -175,6 +177,18 @@ describe('settings guards', () => {
     expect(isPipLayoutConfig({ anchor: 'bottom-right', scale: 'medium', marginX: -1, marginY: 228 })).toBe(false);
     expect(isPreviewLayoutTemplateId('split-horizontal')).toBe(true);
     expect(isPreviewLayoutTemplateId('grid')).toBe(false);
+    expect(isCoverTemplateId('dual-card')).toBe(true);
+    expect(isCoverTemplateId('poster')).toBe(false);
+    expect(isCoverTemplateSettings({
+      templateId: 'clean-date',
+      dateWatermarkEnabled: true,
+      infoWatermarkEnabled: false,
+    })).toBe(true);
+    expect(isCoverTemplateSettings({
+      templateId: 'poster',
+      dateWatermarkEnabled: true,
+      infoWatermarkEnabled: false,
+    })).toBe(false);
   });
 });
 

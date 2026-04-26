@@ -13,8 +13,7 @@ export type CompositionLayoutId =
   | 'pip'
   | 'split-horizontal'
   | 'split-vertical'
-  | 'stack'
-  | 'detail-zoom';
+  | 'stack';
 export type CompositionOutputKind = 'photo' | 'video' | 'cover';
 export type CompositionFrameOrientation = FrameOrientation;
 

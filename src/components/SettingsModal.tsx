@@ -9,7 +9,9 @@ import {
   VIDEO_CODEC_CONFIG,
   VIDEO_QUALITY_CONFIG,
 } from '../config/camera';
+import { COVER_TEMPLATE_IDS, COVER_TEMPLATE_LABELS } from '../config/coverTemplates';
 import { styles } from '../styles/cameraStyles';
+import type { CoverTemplateSettings } from '../types/coverTemplate';
 import type {
   FlashMode,
   PhotoFormat,
@@ -30,8 +32,10 @@ function SettingsModal({
   device,
   devicesCount,
   capabilities,
+  coverTemplate,
   flashMode,
   onClose,
+  onCoverTemplateChange,
   onFlashModeChange,
   open,
   photoFormat,
@@ -58,8 +62,10 @@ function SettingsModal({
   device: CameraDevice | null;
   devicesCount: number;
   capabilities: CameraCapabilities;
+  coverTemplate: CoverTemplateSettings;
   flashMode: FlashMode;
   onClose: () => void;
+  onCoverTemplateChange: (value: CoverTemplateSettings) => void;
   onFlashModeChange: (mode: FlashMode) => void;
   open: boolean;
   photoFormat: PhotoFormat;
@@ -180,6 +186,13 @@ function SettingsModal({
                   {(['off', 'subtle', 'strong'] as SafetyOverlayMode[]).map(value => (
                     <Chip key={value} active={safetyOverlayMode === value} label={SAFETY_OVERLAY_LABELS[value]} onPress={() => onSafetyOverlayModeChange(value)} />
                   ))}
+                </SettingsSection>
+                <SettingsSection title="封面水印">
+                  {COVER_TEMPLATE_IDS.map(value => (
+                    <Chip key={value} active={coverTemplate.templateId === value} label={COVER_TEMPLATE_LABELS[value]} onPress={() => onCoverTemplateChange({ ...coverTemplate, templateId: value })} />
+                  ))}
+                  <Chip active={coverTemplate.dateWatermarkEnabled} label="日期水印" onPress={() => onCoverTemplateChange({ ...coverTemplate, dateWatermarkEnabled: !coverTemplate.dateWatermarkEnabled })} />
+                  <Chip active={coverTemplate.infoWatermarkEnabled} label="参数水印" onPress={() => onCoverTemplateChange({ ...coverTemplate, infoWatermarkEnabled: !coverTemplate.infoWatermarkEnabled })} />
                 </SettingsSection>
               </>
             ) : tab === 'video' ? (

@@ -84,12 +84,13 @@ export function enrichGalleryMediaWithIndex(
 export function buildReadyAsset(input: {
   captureId: string;
   createdAt: number;
-  type: 'photo' | 'video';
+  type: 'photo' | 'video' | 'cover';
   role: DualMediaRole;
   aspect: DualMediaAsset['aspect'];
   uri: string;
   localPath?: string;
   sourceUri?: string;
+  templateId?: string;
 }): DualMediaAsset {
   return {
     id: `${input.captureId}_${input.role}_${slugify(input.uri)}`,
@@ -101,6 +102,7 @@ export function buildReadyAsset(input: {
     uri: input.uri,
     localPath: input.localPath,
     sourceUri: input.sourceUri,
+    templateId: input.templateId,
     status: 'ready',
   };
 }
