@@ -1,6 +1,12 @@
 import { NativeModules, Platform, requireNativeComponent } from 'react-native';
 
-import type { NativeVideoViewProps, PhotoFormat, PhotoVariant, VideoCodecFormat } from '../types/camera';
+import type {
+  ConcurrentCompositeLayout,
+  NativeVideoViewProps,
+  PhotoFormat,
+  PhotoVariant,
+  VideoCodecFormat,
+} from '../types/camera';
 import type { CoverTemplateId } from '../types/coverTemplate';
 
 export const NativeDualViewVideoView =
@@ -129,6 +135,21 @@ export const { DualViewMedia } = NativeModules as {
       codec: VideoCodecFormat,
       mirror: boolean,
       rotateLandscapeFallback: boolean,
+    ): Promise<string>;
+    createConcurrentCompositePhoto?(
+      mainPath: string,
+      subPath: string,
+      suffix: string,
+      layout: ConcurrentCompositeLayout,
+      format: PhotoFormat,
+      quality: number,
+    ): Promise<string>;
+    createConcurrentCompositeVideo?(
+      mainPath: string,
+      subPath: string,
+      suffix: string,
+      layout: ConcurrentCompositeLayout,
+      codec: VideoCodecFormat,
     ): Promise<string>;
     createWatermarkedCover?(
       sourcePath: string,

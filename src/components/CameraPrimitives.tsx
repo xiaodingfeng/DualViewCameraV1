@@ -93,6 +93,7 @@ export function TopBar({
   aspectOptions,
   captureMode,
   flashMode,
+  hideAspectControls = false,
   isRecording,
   onAspectChange,
   onCycleFlash,
@@ -108,6 +109,7 @@ export function TopBar({
   aspectOptions: typeof ASPECT_RATIOS;
   captureMode: CaptureMode;
   flashMode: FlashMode;
+  hideAspectControls?: boolean;
   isRecording: boolean;
   onAspectChange: (value: AspectRatioId) => void;
   onCycleFlash: () => void;
@@ -137,7 +139,7 @@ export function TopBar({
                 <Text style={styles.topPillText}>{VIDEO_QUALITY_CONFIG[videoQuality].label}</Text>
               </Pressable>
             </View>
-            <View style={styles.aspectRow}>
+            {!hideAspectControls && <View style={styles.aspectRow}>
               {aspectOptions.map(option => (
                 <Pressable
                   key={option.id}
@@ -149,9 +151,9 @@ export function TopBar({
                   </Text>
                 </Pressable>
               ))}
-            </View>
+            </View>}
           </View>
-        ) : (
+        ) : hideAspectControls ? null : (
           <View style={styles.aspectRow}>
             {aspectOptions.map(option => (
               <Pressable
@@ -181,6 +183,7 @@ export function TopBar({
 
 export function BottomControls({
   captureMode,
+  hideViewModeSwitch = false,
   isBusy,
   isRecording,
   lastMedia,
@@ -192,6 +195,7 @@ export function BottomControls({
   viewMode,
 }: {
   captureMode: CaptureMode;
+  hideViewModeSwitch?: boolean;
   isBusy: boolean;
   isRecording: boolean;
   lastMedia: LastMedia;
@@ -227,14 +231,14 @@ export function BottomControls({
           <SwitchCameraIcon width={32} height={32} />
         </RoundButton>
       </View>
-      <View style={styles.viewModeRow}>
+      {!hideViewModeSwitch && <View style={styles.viewModeRow}>
         <Pressable style={styles.viewModeButton} onPress={() => !isRecording && onViewModeChange('single')} disabled={isRecording}>
           <Text style={[styles.viewModeText, viewMode === 'single' && styles.viewModeTextActive, isRecording && styles.viewModeTextDisabled]}>单画面</Text>
         </Pressable>
         <Pressable style={styles.viewModeButton} onPress={() => !isRecording && onViewModeChange('dual')} disabled={isRecording}>
           <Text style={[styles.viewModeText, viewMode === 'dual' && styles.viewModeTextActive, isRecording && styles.viewModeTextDisabled]}>双画面</Text>
         </Pressable>
-      </View>
+      </View>}
     </View>
   );
 }

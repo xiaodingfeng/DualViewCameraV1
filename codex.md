@@ -2474,3 +2474,46 @@ cd android
 - [x] `npm test -- --runInBand`
 - [x] UTF-8 / mojibake 模式扫描无新增命中
 - [ ] `:app:assembleDebug`（用户已要求后续不需要 assemble 并安装，本轮跳过）
+
+## 2026-04-26 Phase 11 修复与产品化记录：双摄并发录像、回切恢复、合成保存
+### 本次目标
+- 修复从双摄并发切回同源双画面后主画面 / PiP 黑屏的问题，并恢复进入并发前的拍照/录像、单/双画面、画幅和主副状态。
+- 移除设置 - 关于中的双摄并发诊断入口和诊断描述。
+- 双摄并发模式下隐藏单/双画面切换和画幅选择，固定为全屏主预览，避免切单画面导致预览冻结。
+- 移除双摄并发主画面常驻状态提示，不再显示“VisionCamera Multi-Camera 已启动”。
+- 增加双摄并发录像、自由拖拽 PiP、主/副摄翻转、分开保存/合成保存，以及合成保存的左右分屏、上下分屏、主图+副条版式。
+
+### 修改文件
+- `src/experimental/concurrentCamera/VisionCameraMultiCamPreview.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/components/CameraPrimitives.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/types/camera.ts`
+- `src/utils/settings.ts`
+- `src/native/dualViewMedia.ts`
+- `android/app/src/main/java/com/dualviewcamerav1init/DualViewMediaModule.kt`
+- 删除 `src/experimental/concurrentCamera/ConcurrentCameraDebugScreen.tsx`
+- 删除 `src/experimental/concurrentCamera/ConcurrentCameraCapabilityPanel.tsx`
+
+### 关键实现
+- 进入双摄并发前记录同源模式快照，退出时恢复 `captureMode`、`viewMode`、`selectedAspectId`、`previewLayoutTemplate` 和 `isSwapped`。
+- 双摄并发预览改为根据拍照/录像模式分别绑定 `Preview + PhotoOutput` 或 `Preview + VideoOutput`，避免同一个 session 长期绑定过多输出。
+- 双摄并发录像同时启动前后两个 `Recorder`，停止后按当前主副摄设置写入主 / 副视频。
+- 双摄并发 PiP 支持在主预览范围内自由拖拽，并把 `leftRatio/topRatio` 写入持久化设置。
+- 并发模式下底部只保留拍照/录像切换、快门和主副摄翻转；单画面按钮隐藏，画幅按钮隐藏。
+- 设置页在并发模式下显示“主副分开保存 / 合成为一个文件”，合成模式才显示“左右分屏 / 上下分屏 / 主图+副条”版式。
+- 原生 `DualViewMediaModule` 增加双摄合成照片和双摄合成视频接口；照片用 Canvas 合成，视频用 Media3 `Composition` 两路序列叠加输出。
+- 合成输出沿用主画面源文件的位置元数据；分开保存时主路录像保留定位元数据。
+
+### 规则补充
+- 双摄并发诊断页已从产品入口移除；后续不再在设置 - 关于页暴露诊断页面或 cameraId 组合明细。
+- 后续没有 Android/native/Gradle/依赖/打包配置改动时，不需要重新执行 `.\gradlew.bat :app:assembleDebug --console plain --stacktrace`。
+- 如果只改 JS/TS 或文档，默认验证为 `npm test -- --runInBand`、`npx tsc --noEmit` 和 UTF-8 / mojibake 扫描。
+- 如果改 Android 原生模块但用户没有要求安装，可优先执行 `:app:compileDebugKotlin` 做原生编译验证，不自动 assemble/install。
+
+### 验证
+- [x] `npx tsc --noEmit`
+- [x] `npm test -- --runInBand`
+- [x] `cd android; .\gradlew.bat :app:compileDebugKotlin --console plain --stacktrace`
+- [x] UTF-8 / mojibake 模式扫描无新增命中
+- [ ] `:app:assembleDebug`（本轮按用户此前要求不执行 assemble/install；已用 `compileDebugKotlin` 验证原生 Kotlin 编译）

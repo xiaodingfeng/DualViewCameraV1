@@ -4,6 +4,10 @@ import { SETTINGS_PATH } from '../config/camera';
 import type { CoverTemplateId, CoverTemplateSettings } from '../types/coverTemplate';
 import type {
   AspectRatioId,
+  ConcurrentCompositeLayout,
+  ConcurrentMainCamera,
+  ConcurrentOutputMode,
+  ConcurrentPipLayoutConfig,
   CaptureSourceMode,
   PersistedSettings,
   PipAnchor,
@@ -67,6 +71,33 @@ export function isViewMode(value: unknown): value is ViewMode {
 
 export function isCaptureSourceMode(value: unknown): value is CaptureSourceMode {
   return value === 'same-camera-crop' || value === 'concurrent-cameras';
+}
+
+export function isConcurrentMainCamera(value: unknown): value is ConcurrentMainCamera {
+  return value === 'back' || value === 'front';
+}
+
+export function isConcurrentOutputMode(value: unknown): value is ConcurrentOutputMode {
+  return value === 'separate' || value === 'composed';
+}
+
+export function isConcurrentCompositeLayout(value: unknown): value is ConcurrentCompositeLayout {
+  return value === 'split-horizontal' || value === 'split-vertical' || value === 'stack';
+}
+
+export function isConcurrentPipLayoutConfig(value: unknown): value is ConcurrentPipLayoutConfig {
+  if (value == null || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.leftRatio === 'number' &&
+    Number.isFinite(candidate.leftRatio) &&
+    candidate.leftRatio >= 0 &&
+    candidate.leftRatio <= 1 &&
+    typeof candidate.topRatio === 'number' &&
+    Number.isFinite(candidate.topRatio) &&
+    candidate.topRatio >= 0 &&
+    candidate.topRatio <= 1
+  );
 }
 
 export function isPipAnchor(value: unknown): value is PipAnchor {

@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.media.MediaMetadataRetriever
@@ -16,13 +17,16 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
 import androidx.heifwriter.HeifWriter
+import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.ScaleAndRotateTransformation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
@@ -482,6 +486,111 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
+  @ReactMethod
+  fun createConcurrentCompositePhoto(
+      mainPath: String,
+      subPath: String,
+      suffix: String,
+      layout: String,
+      format: String,
+      quality: Double,
+      promise: Promise
+  ) {
+    try {
+      val mainSource = File(mainPath.removePrefix("file://"))
+      val subSource = File(subPath.removePrefix("file://"))
+      if (!mainSource.exists()) {
+        promise.reject("ENOENT", "Main photo does not exist: ${mainSource.absolutePath}")
+        return
+      }
+      if (!subSource.exists()) {
+        promise.reject("ENOENT", "Sub photo does not exist: ${subSource.absolutePath}")
+        return
+      }
+
+      val mainDecoded = BitmapFactory.decodeFile(mainSource.absolutePath)
+      val subDecoded = BitmapFactory.decodeFile(subSource.absolutePath)
+      if (mainDecoded == null || subDecoded == null) {
+        mainDecoded?.recycle()
+        subDecoded?.recycle()
+        promise.reject("EDECODE", "Unable to decode concurrent photos")
+        return
+      }
+
+      val mainUpright = applyExifOrientation(mainDecoded, mainSource.absolutePath)
+      val subUpright = applyExifOrientation(subDecoded, subSource.absolutePath)
+      val rects = concurrentCompositeRects(layout)
+      val target = Bitmap.createBitmap(rects.width, rects.height, Bitmap.Config.ARGB_8888)
+      val canvas = Canvas(target)
+      canvas.drawColor(Color.BLACK)
+      drawCenterCrop(canvas, mainUpright, rects.main)
+      drawCenterCrop(canvas, subUpright, rects.sub)
+
+      val useHeif = shouldWriteHeif(format)
+      val output = File(
+          reactContext.cacheDir,
+          "DualViewCamera_${safeSuffix(suffix)}_${safeSuffix(layout)}_${System.currentTimeMillis()}.${if (useHeif) "heic" else "jpg"}"
+      )
+      val safeQuality = safeQuality(quality)
+      if (useHeif) {
+        writeHeif(target, output, safeQuality)
+      } else {
+        FileOutputStream(output).use { stream ->
+          target.compress(Bitmap.CompressFormat.JPEG, safeQuality, stream)
+        }
+      }
+      copyExifLocation(mainSource.absolutePath, output.absolutePath)
+
+      if (mainDecoded !== mainUpright) mainDecoded.recycle()
+      if (subDecoded !== subUpright) subDecoded.recycle()
+      mainUpright.recycle()
+      subUpright.recycle()
+      target.recycle()
+
+      promise.resolve(output.absolutePath)
+    } catch (error: Throwable) {
+      promise.reject("ECOMPOSITE_PHOTO", error.message, error)
+    }
+  }
+
+  @ReactMethod
+  fun createConcurrentCompositeVideo(
+      mainPath: String,
+      subPath: String,
+      suffix: String,
+      layout: String,
+      codec: String,
+      promise: Promise
+  ) {
+    try {
+      val mainSource = File(mainPath.removePrefix("file://"))
+      val subSource = File(subPath.removePrefix("file://"))
+      if (!mainSource.exists()) {
+        promise.reject("ENOENT", "Main video does not exist: ${mainSource.absolutePath}")
+        return
+      }
+      if (!subSource.exists()) {
+        promise.reject("ENOENT", "Sub video does not exist: ${subSource.absolutePath}")
+        return
+      }
+
+      val target = File(
+          reactContext.cacheDir,
+          "DualViewCamera_${safeSuffix(suffix)}_${safeSuffix(layout)}_${System.currentTimeMillis()}.mp4"
+      )
+      startConcurrentCompositeVideoTransform(
+          mainSource,
+          subSource,
+          target,
+          concurrentCompositeRects(layout),
+          videoCodecMimeType(codec),
+          promise
+      )
+    } catch (error: Throwable) {
+      promise.reject("ECOMPOSITE_VIDEO", error.message, error)
+    }
+  }
+
   private fun enqueueVideoTransform(task: VideoTransformTask) {
     synchronized(videoTransformQueueLock) {
       videoTransformQueue.add(task)
@@ -583,6 +692,82 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun startConcurrentCompositeVideoTransform(
+      mainSource: File,
+      subSource: File,
+      target: File,
+      rects: CompositeRects,
+      targetCodec: String,
+      promise: Promise
+  ) {
+    try {
+      val mainEffects = compositeVideoEffects(rects.main, rects.width, rects.height)
+      val subEffects = compositeVideoEffects(rects.sub, rects.width, rects.height)
+      val mainItem = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(mainSource)))
+          .setEffects(Effects(emptyList(), mainEffects))
+          .build()
+      val subItem = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(subSource)))
+          .setRemoveAudio(true)
+          .setEffects(Effects(emptyList(), subEffects))
+          .build()
+      val mainSequence = EditedMediaItemSequence.Builder(
+          setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO)
+      )
+          .addItem(mainItem)
+          .build()
+      val subSequence = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_VIDEO))
+          .addItem(subItem)
+          .build()
+      val composition = Composition.Builder(mainSequence, subSequence).build()
+
+      val transformerId = UUID.randomUUID().toString()
+      val listener = object : Transformer.Listener {
+        override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+          activeTransformers.remove(transformerId)
+          promise.resolve(target.absolutePath)
+        }
+
+        override fun onError(
+            composition: Composition,
+            exportResult: ExportResult,
+            exportException: ExportException
+        ) {
+          activeTransformers.remove(transformerId)
+          promise.reject("ECOMPOSITE_VIDEO", exportException.message, exportException)
+        }
+      }
+      val transformer = Transformer.Builder(reactContext)
+          .setVideoMimeType(targetCodec)
+          .setAudioMimeType(MimeTypes.AUDIO_AAC)
+          .addListener(listener)
+          .build()
+      activeTransformers.put(transformerId, transformer)
+      transformer.start(composition, target.absolutePath)
+    } catch (error: Throwable) {
+      promise.reject("ECOMPOSITE_VIDEO", error.message, error)
+    }
+  }
+
+  private fun compositeVideoEffects(rect: RectF, width: Int, height: Int): List<Effect> {
+    val scaleX = rect.width() / width.toFloat()
+    val scaleY = rect.height() / height.toFloat()
+    val translateX = ((rect.left + rect.right) / width.toFloat()) - 1f
+    val translateY = 1f - ((rect.top + rect.bottom) / height.toFloat())
+    return listOf(
+        Presentation.createForWidthAndHeight(
+            width,
+            height,
+            Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
+        ),
+        MatrixTransformation { _ ->
+          Matrix().apply {
+            postScale(scaleX, scaleY)
+            postTranslate(translateX, translateY)
+          }
+        }
+    )
+  }
+
   private data class VideoTransformTask(
       val source: File,
       val target: File,
@@ -595,6 +780,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
   private data class VideoTargetSpec(val width: Int, val height: Int)
   private data class VideoDisplaySpec(val width: Double, val height: Double, val mimeType: String?)
+  private data class CompositeRects(val width: Int, val height: Int, val main: RectF, val sub: RectF)
 
   private fun photoAspectForVariant(variant: String): Double {
     return when (variant) {
@@ -701,6 +887,47 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     val left = ((sourceWidth - cropWidth) / 2).coerceAtLeast(0)
     val top = ((sourceHeight - cropHeight) / 2).coerceAtLeast(0)
     return Bitmap.createBitmap(source, left, top, cropWidth, cropHeight)
+  }
+
+  private fun drawCenterCrop(canvas: Canvas, source: Bitmap, targetRect: RectF) {
+    val sourceAspect = source.width.toDouble() / source.height.toDouble()
+    val targetAspect = targetRect.width().toDouble() / targetRect.height().toDouble()
+    val srcRect = if (sourceAspect > targetAspect) {
+      val cropWidth = (source.height * targetAspect).roundToInt().coerceAtMost(source.width)
+      val left = ((source.width - cropWidth) / 2).coerceAtLeast(0)
+      Rect(left, 0, left + cropWidth, source.height)
+    } else {
+      val cropHeight = (source.width / targetAspect).roundToInt().coerceAtMost(source.height)
+      val top = ((source.height - cropHeight) / 2).coerceAtLeast(0)
+      Rect(0, top, source.width, top + cropHeight)
+    }
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    canvas.drawBitmap(source, srcRect, targetRect, paint)
+  }
+
+  private fun concurrentCompositeRects(layout: String): CompositeRects {
+    val width = 1280
+    val height = 720
+    return when (layout) {
+      "split-vertical" -> CompositeRects(
+          width,
+          height,
+          RectF(0f, 0f, width.toFloat(), height * 0.5f),
+          RectF(0f, height * 0.5f, width.toFloat(), height.toFloat())
+      )
+      "stack" -> CompositeRects(
+          width,
+          height,
+          RectF(0f, 0f, width.toFloat(), height * 0.75f),
+          RectF(0f, height * 0.75f, width.toFloat(), height.toFloat())
+      )
+      else -> CompositeRects(
+          width,
+          height,
+          RectF(0f, 0f, width * 0.5f, height.toFloat()),
+          RectF(width * 0.5f, 0f, width.toFloat(), height.toFloat())
+      )
+    }
   }
 
   private fun drawCoverBitmap(

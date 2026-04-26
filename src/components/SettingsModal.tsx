@@ -15,6 +15,8 @@ import type { CoverTemplateSettings } from '../types/coverTemplate';
 import type { ConcurrentCameraCapability } from '../types/concurrentCamera';
 import type {
   CaptureSourceMode,
+  ConcurrentCompositeLayout,
+  ConcurrentOutputMode,
   FlashMode,
   PhotoFormat,
   PhotoQuality,
@@ -36,14 +38,17 @@ function SettingsModal({
   devicesCount,
   capabilities,
   captureSourceMode,
+  concurrentCompositeLayout,
   coverTemplate,
   concurrentCameraCapability,
+  concurrentOutputMode,
   flashMode,
   onCaptureSourceModeChange,
   onClose,
+  onConcurrentCompositeLayoutChange,
+  onConcurrentOutputModeChange,
   onCoverTemplateChange,
   onFlashModeChange,
-  onOpenConcurrentCameraDebug,
   open,
   photoFormat,
   onPhotoFormatChange,
@@ -70,14 +75,17 @@ function SettingsModal({
   devicesCount: number;
   capabilities: CameraCapabilities;
   captureSourceMode: CaptureSourceMode;
+  concurrentCompositeLayout: ConcurrentCompositeLayout;
   coverTemplate: CoverTemplateSettings;
   concurrentCameraCapability: ConcurrentCameraCapability | null;
+  concurrentOutputMode: ConcurrentOutputMode;
   flashMode: FlashMode;
   onCaptureSourceModeChange: (value: CaptureSourceMode) => void;
   onClose: () => void;
+  onConcurrentCompositeLayoutChange: (value: ConcurrentCompositeLayout) => void;
+  onConcurrentOutputModeChange: (value: ConcurrentOutputMode) => void;
   onCoverTemplateChange: (value: CoverTemplateSettings) => void;
   onFlashModeChange: (mode: FlashMode) => void;
-  onOpenConcurrentCameraDebug: () => void;
   open: boolean;
   photoFormat: PhotoFormat;
   onPhotoFormatChange: (value: PhotoFormat) => void;
@@ -225,7 +233,7 @@ function SettingsModal({
                 <SettingsSection title="软件信息">
                   <Text style={styles.aboutAppTitle}>Agile</Text>
                   <Text style={styles.aboutVersion}>版本：1.0.0 (Build 20260419)</Text>
-                  <Text style={[styles.settingLine, { marginTop: 8 }]}>Agile 是一款本地相机工具，支持同源双画面构图输出，并在设备支持时开放双摄并发高级模式。</Text>
+                  <Text style={[styles.settingLine, { marginTop: 8 }]}>Agile 是一款本地相机工具，支持拍照、录像和双画面构图输出。</Text>
                 </SettingsSection>
                 <SettingsSection title="合规指引">
                   <LegalLink label="服务使用协议" onPress={() => setLegalDoc('service')} />
@@ -235,7 +243,7 @@ function SettingsModal({
               </>
             )}
 
-            {(tab === 'photo' || tab === 'video') && (
+            {(tab === 'photo' || tab === 'video') && captureSourceMode === 'same-camera-crop' && (
               <SettingsSection title="双画面">
                 <Chip active={viewMode === 'dual'} label="双画面预览已开启" />
                 <Chip active={saveDualOutputs} label="双画面同时保存" onPress={() => setSaveDualOutputs(!saveDualOutputs)} />
@@ -250,6 +258,15 @@ function SettingsModal({
               </SettingsSection>
             )}
 
+            {(tab === 'photo' || tab === 'video') && captureSourceMode === 'concurrent-cameras' && (
+              <ConcurrentOutputSection
+                concurrentCompositeLayout={concurrentCompositeLayout}
+                concurrentOutputMode={concurrentOutputMode}
+                onConcurrentCompositeLayoutChange={onConcurrentCompositeLayoutChange}
+                onConcurrentOutputModeChange={onConcurrentOutputModeChange}
+              />
+            )}
+
             {tab === 'about' && (
               <>
                 <SettingsSection title="开发者">
@@ -259,15 +276,6 @@ function SettingsModal({
                 <SettingsSection title="设备能力">
                   <Text style={styles.settingLine}>镜头数量：{devicesCount}</Text>
                   <Text style={styles.settingLine}>缩放范围：{device?.minZoom?.toFixed(1)}x ~ {device?.maxZoom?.toFixed(1)}x</Text>
-                </SettingsSection>
-                <SettingsSection title="双摄并发">
-                  <Text style={styles.settingLine}>{concurrentCameraStatusText(concurrentCameraCapability)}</Text>
-                  {concurrentCameraCapability?.pairs.map(pair => (
-                    <Text key={pair.id} style={styles.settingLine}>
-                      {pair.primaryFacing}:{pair.primaryCameraId} + {pair.secondaryFacing}:{pair.secondaryCameraId}
-                    </Text>
-                  ))}
-                  <Chip label="打开诊断页" onPress={onOpenConcurrentCameraDebug} />
                 </SettingsSection>
               </>
             )}
@@ -344,6 +352,47 @@ function SafetyOverlaySection({
   );
 }
 
+function ConcurrentOutputSection({
+  concurrentCompositeLayout,
+  concurrentOutputMode,
+  onConcurrentCompositeLayoutChange,
+  onConcurrentOutputModeChange,
+}: {
+  concurrentCompositeLayout: ConcurrentCompositeLayout;
+  concurrentOutputMode: ConcurrentOutputMode;
+  onConcurrentCompositeLayoutChange: (value: ConcurrentCompositeLayout) => void;
+  onConcurrentOutputModeChange: (value: ConcurrentOutputMode) => void;
+}) {
+  return (
+    <SettingsSection title="双摄并发保存">
+      <Chip
+        active={concurrentOutputMode === 'separate'}
+        label="主副分开保存"
+        onPress={() => onConcurrentOutputModeChange('separate')}
+      />
+      <Chip
+        active={concurrentOutputMode === 'composed'}
+        label="合成为一个文件"
+        onPress={() => onConcurrentOutputModeChange('composed')}
+      />
+      <Text style={styles.settingLine}>
+        {concurrentOutputMode === 'separate'
+          ? '分开保存会保留前后两个原始视角，适合后期剪辑。'
+          : '合成保存会输出一个可直接分享的成片，下面的版式只影响合成文件。'}
+      </Text>
+      {concurrentOutputMode === 'composed' &&
+        CONCURRENT_COMPOSITE_LAYOUTS.map(item => (
+          <Chip
+            key={item.id}
+            active={concurrentCompositeLayout === item.id}
+            label={item.label}
+            onPress={() => onConcurrentCompositeLayoutChange(item.id)}
+          />
+        ))}
+    </SettingsSection>
+  );
+}
+
 function LegalLink({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable style={styles.legalLink} onPress={onPress}>
@@ -378,6 +427,12 @@ const SAFETY_OVERLAY_LABELS: Record<SafetyOverlayMode, string> = {
 
 const PREVIEW_LAYOUT_TEMPLATES: Array<{ id: PreviewLayoutTemplateId; label: string }> = [
   { id: 'pip', label: '画中画' },
+  { id: 'split-horizontal', label: '左右分屏' },
+  { id: 'split-vertical', label: '上下分屏' },
+  { id: 'stack', label: '主图+副条' },
+];
+
+const CONCURRENT_COMPOSITE_LAYOUTS: Array<{ id: ConcurrentCompositeLayout; label: string }> = [
   { id: 'split-horizontal', label: '左右分屏' },
   { id: 'split-vertical', label: '上下分屏' },
   { id: 'stack', label: '主图+副条' },

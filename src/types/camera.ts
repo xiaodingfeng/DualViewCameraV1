@@ -35,6 +35,13 @@ export type VideoQuality = '720' | '1080' | '4K' | '8K';
 export type VideoFps = 30 | 60;
 export type VideoCodecFormat = 'h265' | 'h264';
 export type SafetyOverlayMode = 'off' | 'subtle' | 'strong';
+export type ConcurrentMainCamera = 'back' | 'front';
+export type ConcurrentOutputMode = 'separate' | 'composed';
+export type ConcurrentCompositeLayout = 'split-horizontal' | 'split-vertical' | 'stack';
+export type ConcurrentPipLayoutConfig = {
+  leftRatio: number;
+  topRatio: number;
+};
 export type PipAnchor = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 export type PipScale = 'small' | 'medium' | 'large';
 export type PreviewLayoutTemplateId = 'pip' | 'split-horizontal' | 'split-vertical' | 'stack';
@@ -56,6 +63,10 @@ export type PersistedSettings = Partial<{
   viewMode: ViewMode;
   captureSourceMode: CaptureSourceMode;
   saveDualOutputs: boolean;
+  concurrentMainCamera: ConcurrentMainCamera;
+  concurrentOutputMode: ConcurrentOutputMode;
+  concurrentCompositeLayout: ConcurrentCompositeLayout;
+  concurrentPipLayout: ConcurrentPipLayoutConfig;
   shutterSoundEnabled: boolean;
   safetyOverlayMode: SafetyOverlayMode;
   pipLayout: PipLayoutConfig;
