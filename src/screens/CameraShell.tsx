@@ -61,6 +61,7 @@ const DEFAULT_COVER_TEMPLATE: CoverTemplateSettings = {
   templateId: 'none',
   dateWatermarkEnabled: true,
   infoWatermarkEnabled: true,
+  title: 'Dual View',
 };
 import { styles } from '../styles/cameraStyles';
 import type {
@@ -978,10 +979,11 @@ function CameraShell({
       }): Promise<DualMediaAsset | null> => {
         if (coverTemplate.templateId === 'none') return null;
         try {
+          const coverTitle = coverTemplate.title.trim() || (input.dual ? 'Dual View' : 'Agile');
           const coverPath = await createCoverForPhoto({
             sourcePath: input.mainLocalPath,
             settings: coverTemplate,
-            title: input.dual ? 'Dual View' : 'Agile',
+            title: coverTitle,
             infoText: `${selectedAspectId} ${input.dual ? 'Dual' : 'Single'}`,
             createdAt: input.createdAt,
           });
@@ -995,9 +997,10 @@ function CameraShell({
             aspect: '16:9',
             uri: coverSaved.uri,
             localPath: coverSaved.localPath,
-            sourceUri: input.sourceUri,
-            templateId: coverTemplate.templateId,
-          });
+          sourceUri: input.sourceUri,
+          templateId: coverTemplate.templateId,
+          title: coverTitle,
+        });
         } catch (error) {
           setToast(cameraErrorMessage(error, '封面生成失败'));
           return null;

@@ -22,6 +22,8 @@ export type GalleryMedia = {
   captureGroupSize?: number;
   captureGroupCreatedAt?: number;
   captureStatus?: 'processing' | 'ready' | 'failed';
+  templateId?: string;
+  title?: string;
   errorMessage?: string;
 };
 

@@ -23,6 +23,7 @@ export interface DualMediaAsset {
   localPath?: string;
   sourceUri?: string;
   templateId?: string;
+  title?: string;
   status: DualMediaStatus;
   errorMessage?: string;
 }

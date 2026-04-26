@@ -489,6 +489,7 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
   return (
     <View style={styles.mediaDetails}>
       <Text style={styles.mediaDetailsTitle}>{item.type === 'photo' ? '照片详情' : '视频详情'}</Text>
+      {item.title ? <Text style={styles.mediaDetailsText}>标题：{item.title}</Text> : null}
       <Text style={styles.mediaDetailsText}>文件：{item.filename ?? '未知'}</Text>
       {item.captureId ? (
         <>
@@ -498,6 +499,7 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
           </Text>
         </>
       ) : null}
+      {item.templateId ? <Text style={styles.mediaDetailsText}>模板：{coverTemplateLabel(item.templateId)}</Text> : null}
       <Text style={styles.mediaDetailsText}>时间：{formatTimestamp(item.timestamp)}</Text>
       <Text style={styles.mediaDetailsText}>尺寸：{item.width || '-'} × {item.height || '-'}</Text>
       {item.type === 'video' ? (
@@ -509,6 +511,19 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
       </Text>
     </View>
   );
+}
+
+function coverTemplateLabel(templateId: string): string {
+  switch (templateId) {
+    case 'clean-date':
+      return '日期封面';
+    case 'dual-card':
+      return '双画面卡片';
+    case 'vlog-title':
+      return 'Vlog 标题';
+    default:
+      return templateId;
+  }
 }
 
 function FailedMediaJobBanner({

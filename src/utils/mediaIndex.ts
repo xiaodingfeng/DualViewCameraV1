@@ -69,6 +69,8 @@ export function enrichGalleryMediaWithIndex(
         captureGroupSize: match.group.assets.length,
         captureGroupCreatedAt: match.group.createdAt,
         captureStatus: match.asset.status,
+        templateId: match.asset.templateId,
+        title: match.asset.title,
         errorMessage: match.asset.errorMessage,
       };
     })
@@ -91,6 +93,7 @@ export function buildReadyAsset(input: {
   localPath?: string;
   sourceUri?: string;
   templateId?: string;
+  title?: string;
 }): DualMediaAsset {
   return {
     id: `${input.captureId}_${input.role}_${slugify(input.uri)}`,
@@ -103,6 +106,7 @@ export function buildReadyAsset(input: {
     localPath: input.localPath,
     sourceUri: input.sourceUri,
     templateId: input.templateId,
+    title: input.title,
     status: 'ready',
   };
 }
@@ -242,6 +246,8 @@ function failedAssetsAsGalleryMedia(
         captureGroupSize: group.assets.length,
         captureGroupCreatedAt: group.createdAt,
         captureStatus: 'failed',
+        templateId: asset.templateId,
+        title: asset.title,
         errorMessage: asset.errorMessage,
       })),
   );

@@ -1805,6 +1805,33 @@ cd android
 
 ---
 
+## 2026-04-26 升级记录（Phase 9 封面元数据）
+### 本次目标
+- 继续 Phase 9，补齐封面标题和模板信息在 Media Asset Index 与 Gallery 详情页之间的传递。
+
+### 修改文件
+- `src/types/mediaAsset.ts`
+- `src/types/camera.ts`
+- `src/utils/mediaIndex.ts`
+- `src/screens/CameraShell.tsx`
+- `src/components/GalleryModal.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `DualMediaAsset` 增加 `title` 元数据字段，封面生成时写入当前封面标题。
+- `GalleryMedia` 增加 `title` 和 `templateId`，通过 `enrichGalleryMediaWithIndex()` 从索引补齐。
+- Gallery 详情页展示封面标题和模板名称，为后续单张封面编辑做数据基础。
+- 单元测试覆盖索引元数据向 Gallery item 的透传。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+---
+
 ## 2026-04-26 Bugfix 记录（封面水印遮罩）
 ### 问题
 - 封面图底部使用半透明遮罩承载标题和水印，遮挡了原始画面内容。
@@ -1819,6 +1846,33 @@ cd android
 - [x] `npx tsc --noEmit`
 - [x] UTF-8 文本扫描无 mojibake 模式残留
 - [x] `:app:assembleDebug`
+
+---
+
+## 2026-04-26 升级记录（Phase 9 标题配置）
+### 本次目标
+- 继续 Phase 9，补齐封面模板的简单标题配置能力。
+
+### 修改文件
+- `src/types/coverTemplate.ts`
+- `src/utils/settings.ts`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `CoverTemplateSettings` 增加 `title` 字段，作为封面默认标题。
+- 设置页封面水印区域增加标题输入框，限制 28 个字符。
+- 封面生成优先使用用户配置标题，空标题回退为当前拍摄模式默认标题。
+- settings 类型守卫增加标题长度校验，避免异常持久化值进入 UI。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
 
 ---
 

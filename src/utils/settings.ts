@@ -86,7 +86,9 @@ export function isCoverTemplateSettings(value: unknown): value is CoverTemplateS
   return (
     isCoverTemplateId(candidate.templateId) &&
     typeof candidate.dateWatermarkEnabled === 'boolean' &&
-    typeof candidate.infoWatermarkEnabled === 'boolean'
+    typeof candidate.infoWatermarkEnabled === 'boolean' &&
+    typeof candidate.title === 'string' &&
+    candidate.title.length <= 28
   );
 }
 

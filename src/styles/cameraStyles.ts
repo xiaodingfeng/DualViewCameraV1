@@ -131,6 +131,7 @@ export const styles = StyleSheet.create({
   chipText: { color: COLORS.muted, fontSize: 12, fontWeight: '700' },
   chipTextActive: { color: COLORS.text },
   settingLine: { color: COLORS.muted, fontSize: 12, lineHeight: 22 },
+  settingsTextInput: { width: '100%', minHeight: 42, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: COLORS.line, color: COLORS.text, backgroundColor: '#111', fontSize: 14, fontWeight: '700' },
   focusBox: { position: 'absolute', width: 72, height: 72, borderWidth: 2, borderColor: COLORS.accent, borderRadius: 4 },
   galleryRoot: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#000', zIndex: 50 },
   galleryCloseIcon: { position: 'absolute', left: 16, height: 38, justifyContent: 'center' },

@@ -183,11 +183,19 @@ describe('settings guards', () => {
       templateId: 'clean-date',
       dateWatermarkEnabled: true,
       infoWatermarkEnabled: false,
+      title: 'Trip',
     })).toBe(true);
     expect(isCoverTemplateSettings({
       templateId: 'poster',
       dateWatermarkEnabled: true,
       infoWatermarkEnabled: false,
+      title: 'Trip',
+    })).toBe(false);
+    expect(isCoverTemplateSettings({
+      templateId: 'clean-date',
+      dateWatermarkEnabled: true,
+      infoWatermarkEnabled: false,
+      title: 'x'.repeat(29),
     })).toBe(false);
   });
 });
@@ -319,6 +327,8 @@ describe('media index helpers', () => {
       aspect: '16:9',
       uri: 'content://media/1',
       localPath: '/storage/DCIM/DualViewCamera/sub.jpg',
+      templateId: 'dual-card',
+      title: 'Weekend',
     });
 
     const [item] = enrichGalleryMediaWithIndex(
@@ -350,6 +360,8 @@ describe('media index helpers', () => {
     expect(item.captureId).toBe('cap_1');
     expect(item.captureRole).toBe('sub');
     expect(item.captureGroupSize).toBe(1);
+    expect(item.templateId).toBe('dual-card');
+    expect(item.title).toBe('Weekend');
   });
 
   it('adds failed media index assets as gallery placeholders', () => {

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { CameraDevice } from 'react-native-vision-camera';
 
 import {
@@ -188,6 +188,14 @@ function SettingsModal({
                   ))}
                 </SettingsSection>
                 <SettingsSection title="封面水印">
+                  <TextInput
+                    maxLength={28}
+                    onChangeText={text => onCoverTemplateChange({ ...coverTemplate, title: text })}
+                    placeholder="封面标题"
+                    placeholderTextColor={COLORS.muted}
+                    style={styles.settingsTextInput}
+                    value={coverTemplate.title}
+                  />
                   {COVER_TEMPLATE_IDS.map(value => (
                     <Chip key={value} active={coverTemplate.templateId === value} label={COVER_TEMPLATE_LABELS[value]} onPress={() => onCoverTemplateChange({ ...coverTemplate, templateId: value })} />
                   ))}
