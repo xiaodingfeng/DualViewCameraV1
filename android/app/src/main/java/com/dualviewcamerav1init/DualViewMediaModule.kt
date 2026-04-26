@@ -315,7 +315,8 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
           format,
           safeQuality(quality),
           mirror,
-          mainRotateLandscapeFallback
+          mainRotateLandscapeFallback,
+          source.absolutePath
       )
       val subTarget = writePhotoVariant(
           upright,
@@ -325,7 +326,8 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
           format,
           safeQuality(quality),
           mirror,
-          subRotateLandscapeFallback
+          subRotateLandscapeFallback,
+          source.absolutePath
       )
 
       if (decoded !== upright) decoded.recycle()
@@ -372,6 +374,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       FileOutputStream(target).use { output ->
         cover.compress(Bitmap.CompressFormat.JPEG, 94, output)
       }
+      copyExifLocation(source.absolutePath, target.absolutePath)
 
       if (decoded !== upright) decoded.recycle()
       upright.recycle()
@@ -398,7 +401,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       }
 
       val upright = applyExifOrientation(decoded, source.absolutePath)
-      val target = writePhotoVariant(upright, targetAspect, variantLabel, suffix, format, quality, mirror, rotateLandscapeFallback)
+      val target = writePhotoVariant(upright, targetAspect, variantLabel, suffix, format, quality, mirror, rotateLandscapeFallback, source.absolutePath)
 
       if (decoded !== upright) decoded.recycle()
       upright.recycle()
@@ -409,7 +412,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
-  private fun writePhotoVariant(source: Bitmap, targetAspect: Double, variantLabel: String, suffix: String, format: String, quality: Int = 94, mirror: Boolean = false, rotateLandscapeFallback: Boolean = false): File {
+  private fun writePhotoVariant(source: Bitmap, targetAspect: Double, variantLabel: String, suffix: String, format: String, quality: Int = 94, mirror: Boolean = false, rotateLandscapeFallback: Boolean = false, sourceLocationPath: String? = null): File {
     val oriented = orientBitmapForTargetAspect(source, targetAspect, rotateLandscapeFallback)
     val cropped = centerCrop(oriented, targetAspect)
     val outputBitmap = if (mirror) mirrorBitmap(cropped) else cropped
@@ -428,6 +431,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     if (outputBitmap !== cropped) outputBitmap.recycle()
     if (oriented !== cropped) cropped.recycle()
     if (oriented !== source && oriented !== cropped) oriented.recycle()
+    copyExifLocation(sourceLocationPath, target.absolutePath)
     return target
   }
 
@@ -772,6 +776,18 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
       preScale(-1f, 1f)
     }
     return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+  }
+
+  private fun copyExifLocation(sourcePath: String?, targetPath: String) {
+    if (sourcePath.isNullOrBlank()) return
+    try {
+      val latLong = ExifInterface(sourcePath).latLong ?: return
+      ExifInterface(targetPath).apply {
+        setLatLong(latLong[0], latLong[1])
+        saveAttributes()
+      }
+    } catch (_: Throwable) {
+    }
   }
 
   private fun safeSuffix(value: String): String {

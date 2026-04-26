@@ -1805,6 +1805,34 @@ cd android
 
 ---
 
+## 2026-04-26 升级记录（拍摄位置元数据）
+### 本次目标
+- 为拍照和录像产物增加拍摄位置元数据，照片写入 EXIF，录像写入视频 metadata。
+
+### 修改文件
+- `package.json`
+- `package-lock.json`
+- `android/app/src/main/AndroidManifest.xml`
+- `android/app/src/main/java/com/dualviewcamerav1init/DualViewMediaModule.kt`
+- `src/screens/CameraShell.tsx`
+- `codex.md`
+
+### 关键实现
+- 接入 `react-native-vision-camera-location`。
+- Android 增加 `ACCESS_FINE_LOCATION` 和 `ACCESS_COARSE_LOCATION` 权限。
+- 相机页启动后请求位置权限；权限未授权或暂未取得定位时，不阻塞拍照/录像。
+- 拍照调用 `capturePhotoToFile()` 时传入当前 `location`，写入原始照片 EXIF。
+- 录像调用 `createRecorder()` 时传入当前 `location`，写入原始视频 metadata。
+- 原生裁切照片和封面生成后，会从原始照片 EXIF 复制 GPS 到生成文件，确保主图、副图、封面都尽量保留拍摄位置。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+
+---
+
 ## 2026-04-26 升级记录（Phase 9 封面元数据）
 ### 本次目标
 - 继续 Phase 9，补齐封面标题和模板信息在 Media Asset Index 与 Gallery 详情页之间的传递。

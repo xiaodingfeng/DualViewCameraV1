@@ -51,6 +51,14 @@ jest.mock('react-native-nitro-modules', () => ({
   callback: (fn: unknown) => fn,
 }));
 
+jest.mock('react-native-vision-camera-location', () => ({
+  useLocation: jest.fn(() => ({
+    hasPermission: false,
+    currentLocation: undefined,
+    requestPermission: jest.fn(() => Promise.resolve(false)),
+  })),
+}));
+
 test('renders correctly', async () => {
   await ReactTestRenderer.act(() => {
     ReactTestRenderer.create(<App />);

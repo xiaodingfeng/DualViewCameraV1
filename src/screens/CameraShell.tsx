@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { callback } from 'react-native-nitro-modules';
+import { useLocation } from 'react-native-vision-camera-location';
 import {
   CommonResolutions,
   type CameraDevice,
@@ -62,6 +63,11 @@ const DEFAULT_COVER_TEMPLATE: CoverTemplateSettings = {
   dateWatermarkEnabled: true,
   infoWatermarkEnabled: true,
   title: 'Dual View',
+};
+const CAPTURE_LOCATION_OPTIONS = {
+  accuracy: 'balanced' as const,
+  distanceFilter: 10,
+  updateInterval: 10000,
 };
 import { styles } from '../styles/cameraStyles';
 import type {
@@ -204,9 +210,11 @@ function CameraShell({
     enableAudio: microphoneReady,
     enablePersistentRecorder: false,
   });
+  const captureLocation = useLocation(CAPTURE_LOCATION_OPTIONS);
 
   const previewRef = useRef<PreviewView | null>(null);
   const recorderRef = useRef<Recorder | null>(null);
+  const hasRequestedLocationPermissionRef = useRef(false);
   const cameraReopenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resumePreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -241,6 +249,12 @@ function CameraShell({
   const [galleryItems, setGalleryItems] = useState<GalleryMedia[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
+
+  useEffect(() => {
+    if (captureLocation.hasPermission || hasRequestedLocationPermissionRef.current) return;
+    hasRequestedLocationPermissionRef.current = true;
+    captureLocation.requestPermission().catch(() => {});
+  }, [captureLocation]);
   const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -1228,6 +1242,7 @@ function CameraShell({
           {
             flashMode: device?.hasFlash ? flashMode : 'off',
             enableShutterSound: shutterSoundEnabled,
+            ...(captureLocation.currentLocation ? { location: captureLocation.currentLocation } : {}),
           },
           {},
       );
@@ -1253,6 +1268,7 @@ function CameraShell({
     }
   }, [
     captureMode,
+    captureLocation.currentLocation,
     cleanupFlashAfterPhoto,
     captureOutputOrientation,
     device?.hasFlash,
@@ -1657,7 +1673,9 @@ function CameraShell({
         videoOutput.outputOrientation = captureOutputOrientation;
       }
 
-      const recorder = await videoOutput.createRecorder({});
+      const recorder = await videoOutput.createRecorder(
+          captureLocation.currentLocation ? { location: captureLocation.currentLocation } : {},
+      );
       recorderRef.current = recorder;
 
       await recorder.startRecording(
@@ -1691,6 +1709,7 @@ function CameraShell({
     appliedVideoQuality,
     captureMode,
     captureOutputOrientation,
+    captureLocation.currentLocation,
     finishRecording,
     isBusy,
     isRecording,
