@@ -4,6 +4,7 @@ import { SETTINGS_PATH } from '../config/camera';
 import type { CoverTemplateId, CoverTemplateSettings } from '../types/coverTemplate';
 import type {
   AspectRatioId,
+  CaptureSourceMode,
   PersistedSettings,
   PipAnchor,
   PipLayoutConfig,
@@ -62,6 +63,10 @@ export function isSafetyOverlayMode(value: unknown): value is SafetyOverlayMode 
 
 export function isViewMode(value: unknown): value is ViewMode {
   return value === 'single' || value === 'dual';
+}
+
+export function isCaptureSourceMode(value: unknown): value is CaptureSourceMode {
+  return value === 'same-camera-crop' || value === 'concurrent-cameras';
 }
 
 export function isPipAnchor(value: unknown): value is PipAnchor {

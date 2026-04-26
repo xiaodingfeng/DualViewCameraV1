@@ -1865,6 +1865,124 @@ cd android
 
 ---
 
+## 2026-04-26 升级记录（Phase 10 Debug 实验页）
+### 本次目标
+- 继续 Phase 10，补齐双摄并发实验页的 JS 侧入口、能力面板、组合选择和生命周期日志骨架。
+- 仍不启动实际 CameraX 双预览绑定，不进入普通用户拍摄路径。
+
+### 修改文件
+- `src/experimental/concurrentCamera/ConcurrentCameraCapabilityPanel.tsx`
+- `src/experimental/concurrentCamera/ConcurrentCameraDebugScreen.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `codex.md`
+
+### 关键实现
+- 新增 `ConcurrentCameraCapabilityPanel`，展示系统返回的并发相机组合、use case 与 CompositionSettings 探测状态。
+- 新增 `ConcurrentCameraDebugScreen`，提供独立全屏 Debug 页面、pair 选择、预览占位区和生命周期日志。
+- 设置页“关于”里的“双摄并发实验”入口只在 `__DEV__` 且能力探测 `supported=true` 时显示。
+- 入口打开后关闭设置页，避免实验页面和设置面板叠层抢占交互。
+- 当前“记录预览探针”只写入日志，下一步再接独立 Native View 和 CameraX bind/unbind。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 下一步
+- 为 Phase 10 增加独立原生预览 ViewManager，占位接收 pair 参数和生命周期命令。
+- Native ViewManager 完成后再做 CameraX concurrent preview 的最小 bind/unbind 实验。
+
+---
+
+## 2026-04-26 升级记录（Phase 10 入口修正与 Native 预览宿主）
+### 本次目标
+- 修正 Debug 实验入口过严导致真机无法看到双摄并发实验页的问题。
+- 加快 Phase 10，补齐独立 Native View 宿主，为后续 CameraX concurrent preview bind/unbind 做准备。
+
+### 设备确认
+- ADB 在线设备：已连接。
+- Android API：36。
+- `pm list features` 确认设备声明 `android.hardware.camera.concurrent`。
+- 结论：系统相机支持前后摄拍照之外，该设备也向第三方声明了 Android concurrent camera feature；此前看不到按钮是 UI gating 过严，不是设备不支持。
+
+### 修改文件
+- `android/app/src/main/java/com/dualviewcamerav1init/DualViewCameraPackage.kt`
+- `android/app/src/main/java/com/dualviewcamerav1init/concurrent/ConcurrentCameraModule.kt`
+- `android/app/src/main/java/com/dualviewcamerav1init/concurrent/ConcurrentCameraPreviewView.kt`
+- `android/app/src/main/java/com/dualviewcamerav1init/concurrent/ConcurrentCameraPreviewViewManager.kt`
+- `src/types/concurrentCamera.ts`
+- `src/experimental/concurrentCamera/ConcurrentCameraCapabilityPanel.tsx`
+- `src/experimental/concurrentCamera/ConcurrentCameraDebugScreen.tsx`
+- `src/experimental/concurrentCamera/ConcurrentCameraPreviewNative.tsx`
+- `src/components/SettingsModal.tsx`
+- `codex.md`
+
+### 关键实现
+- Debug 设置页不再要求 `supported=true` 才显示“打开实验页”，现在 Debug 下始终可进入实验页查看原因。
+- 能力探测结果新增 `androidApiLevel`、`hasConcurrentFeature`、`cameras`，实验页可直接显示 API、系统 feature 和全部 cameraId。
+- 新增 `ConcurrentCameraPreviewView` 与 `ConcurrentCameraPreviewViewManager`，已注册到 `DualViewCameraPackage`。
+- 新增 JS 包装 `ConcurrentCameraPreviewNative`，实验页可以加载独立原生预览宿主，并传入 primary/secondary cameraId 与 active 状态。
+- 当前 Native View 仍是占位宿主，不打开相机；下一步在该 View 内接 CameraX concurrent session，避免污染现有 VisionCamera 主链路。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+- [x] `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`
+- [x] `adb shell monkey -p com.dualviewcamerav1init -c android.intent.category.LAUNCHER 1`
+- [x] `adb shell pidof com.dualviewcamerav1init` 返回在线进程
+
+### 下一步
+- 在 `ConcurrentCameraPreviewView` 内接入 CameraX `ProcessCameraProvider` 的 concurrent camera bind/unbind。
+- 先只做双预览，不做拍照/录像；若双预览稳定，再进入 Phase 11 的产品化高级模式。
+
+---
+
+## 2026-04-26 升级记录（Phase 10 收口：CameraX 并发双预览）
+### 本次目标
+- 一次性完成 Phase 10 的剩余开发：实验入口常显、能力原因常显、独立 Native View 内接 CameraX 双预览 bind/unbind。
+- Phase 10 到此只验证预览链路，不做拍照、录像和 Gallery 入库；这些进入 Phase 11。
+
+### 修改文件
+- `android/app/build.gradle`
+- `android/app/src/main/java/com/dualviewcamerav1init/concurrent/ConcurrentCameraPreviewView.kt`
+- `src/experimental/concurrentCamera/ConcurrentCameraDebugScreen.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/components/SettingsModal.tsx`
+- `codex.md`
+
+### 关键实现
+- `app` 模块显式加入 CameraX `camera-core`、`camera-camera2`、`camera-lifecycle`、`camera-view`，版本与 VisionCamera 当前依赖保持 `1.7.0-alpha01`。
+- `ConcurrentCameraPreviewView` 内部创建两个 `PreviewView`：主画面全屏，副画面 PiP。
+- `active=true` 时使用 `ProcessCameraProvider.bindToLifecycle(List<SingleCameraConfig>)` 绑定两个 Preview use case。
+- 通过 `Camera2CameraInfo.from(info).cameraId` 精确匹配实验页选中的 primary / secondary cameraId。
+- 进入实验页时 `CameraShell` 会暂停现有 VisionCamera 主相机，避免主链路占用 CameraX/Camera2 资源导致并发绑定失败。
+- 设置页“双摄并发实验”板块不再依赖 `__DEV__`，无论支持与否都显示能力状态；不支持设备会在该板块直接说明原因。
+
+### 真机状态
+- 设备 `1b31f81b`：声明 `android.hardware.camera.concurrent`。
+- 设备 `723cb6aa`：未声明 `android.hardware.camera.concurrent`，应显示“当前设备未声明系统并发相机能力”。
+- 两台设备均已安装最新 debug APK 并启动成功。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+- [x] 两台 ADB 设备 `adb install -r` 成功
+- [x] 两台 ADB 设备 `monkey` 启动成功并返回进程 ID
+- [x] 启动后 logcat 未发现 `FATAL EXCEPTION` / `AndroidRuntime` 崩溃
+
+### Phase 10 结论
+- Phase 10 的代码侧工作已完成：能力探测、支持/不支持显示、实验页、独立 Native View、CameraX 并发双预览绑定链路均已落地。
+- 是否能在具体机型上真正看到双路实时画面，需要在支持设备上进入实验页并点击“启动原生预览占位”做人工确认。
+- 人工确认支持设备双预览稳定后，进入 Phase 11：把真双摄作为高级拍摄模式产品化，接入拍照和录像。
+
+---
+
 ## 2026-04-26 升级记录（Phase 9 封面元数据）
 ### 本次目标
 - 继续 Phase 9，补齐封面标题和模板信息在 Media Asset Index 与 Gallery 详情页之间的传递。
@@ -2210,3 +2328,149 @@ cd android
 - [x] `npx tsc --noEmit`
 - [x] UTF-8 文本扫描无 mojibake 模式残留
 - [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+---
+
+## 2026-04-26 升级记录（Phase 11 双摄并发产品化入口与拍照）
+### 本次目标
+- 将双摄并发从实验诊断页推进到普通产品路径，作为“拍摄源”高级模式开放。
+- 默认仍保持同源双画面的稳定路径；仅在系统能力探测确认支持时允许切换到双摄并发。
+- 不支持设备在设置页直接显示原因，不再让用户误以为入口缺失。
+
+### 修改文件
+- `src/types/camera.ts`
+- `src/utils/settings.ts`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/experimental/concurrentCamera/ConcurrentCameraPreviewNative.tsx`
+- `android/app/src/main/java/com/dualviewcamerav1init/concurrent/ConcurrentCameraPreviewView.kt`
+- `android/app/src/main/java/com/dualviewcamerav1init/concurrent/ConcurrentCameraPreviewViewManager.kt`
+- `codex.md`
+
+### 关键实现
+- 新增 `CaptureSourceMode`：`same-camera-crop` 为默认稳定模式，`concurrent-cameras` 为双摄并发高级模式。
+- 设置页新增“拍摄源”板块，照片/录像页均可看到同源双画面和双摄并发入口；双摄不支持时按钮置灰并显示具体能力原因。
+- 进入双摄并发模式时，主 VisionCamera 管线暂停，主界面直接挂载 `ConcurrentCameraPreviewView`，避免两个相机栈抢占硬件。
+- Native 并发 View 从纯预览升级为双路 `Preview + ImageCapture`，JS 快门通过 ViewManager command 触发原生双路拍照。
+- 原生拍照完成后通过 direct event 回传主/副相机照片路径，JS 侧写入 CameraRoll 和 Media Asset Index，Gallery 可按同一 capture group 展示。
+- 录像入口暂不强行启用不稳定路径；双摄并发模式下录像会提示当前已支持并发拍照，录像继续走后续独立接入。
+- 重写 `SettingsModal.tsx` 的可见文案，保持 UTF-8 中文，避免继续叠加乱码。
+
+### 验证结果
+- [x] `npx tsc --noEmit`
+- [x] `npm test -- --runInBand`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+- [x] Debug APK 已安装到两台 USB 设备
+- [x] 两台设备均可启动，进程在线
+- [x] 最近 AndroidRuntime / ReactNative 错误日志为空
+
+### 后续方向
+- Phase 11 继续补齐双摄并发录像：优先做设备组合能力降级和失败回退，避免把不支持的 `VideoCapture + Preview` 组合暴露成崩溃。
+- 真机上需要重点验证支持 `FEATURE_CAMERA_CONCURRENT` 的设备是否接受 `Preview + ImageCapture` 双路组合；若设备拒绝该组合，产品层保留并发入口但自动降级为双预览提示。
+
+### Phase 11 追加实现：双摄并发录像
+- Native 并发 View 新增 `captureMode` 属性：拍照模式绑定双路 `Preview + ImageCapture`，录像模式绑定双路 `Preview + VideoCapture`，减少单次 session 的 use case 压力。
+- 新增 `camera-video` 依赖，并通过 ViewManager commands 暴露 `startVideo` / `stopVideo`。
+- 双摄并发录像完成后回传主/副视频路径，JS 侧保存到 CameraRoll 并写入 Media Asset Index。
+- 双摄并发模式下拍照和录像都已接入主快门；同源双画面仍是默认稳定模式。
+
+### 追加验证结果
+- [x] `npx tsc --noEmit`
+- [x] `npm test -- --runInBand`
+- [x] `:app:assembleDebug`
+- [x] Debug APK 已重新安装到两台 USB 设备
+- [x] 两台设备均可启动，进程在线，最近 AndroidRuntime / ReactNative 错误日志为空
+
+## 2026-04-26 Bugfix 记录（双摄并发 bind failed 与回切黑屏）
+### 问题
+- 点击“双摄并发”后主画面显示 `bind failed: IllegalArgumentException`，并且用户看到的状态文案被放在“预览异常”弹框里，容易误判为整机不支持。
+- 从双摄并发切回同源双画面后，VisionCamera session 没有被强制重开，主画面和 PiP 可能保持黑屏，切换拍照/录像模式后才恢复。
+
+### 判断
+- 这不是“系统完全不支持 0 + 1 并发”的直接证据。
+- Android `FEATURE_CAMERA_CONCURRENT` / `concurrentCameraIds` 只说明系统声明这组 cameraId 可以并发打开；不保证这组 cameraId 支持 `Preview + ImageCapture` 或 `Preview + VideoCapture` 等扩展 use case 组合。
+- 当前报错更符合应用代码问题：进入双摄并发时直接按拍照/录像模式绑定扩展输出，导致 CameraX 对该组合抛 `IllegalArgumentException`。
+
+### 多摄像头接口文档补充
+- VisionCamera 官方 Multi-Camera 文档：https://visioncamera.margelo.com/docs/multi-camera
+- 文档说明 VisionCamera 5 支持 `VisionCamera.supportsMultiCamSessions` 和 `VisionCamera.createCameraSession(true)` 创建 multi-camera session。
+- 一个 multi-camera session 可配置多个 `CameraSessionConnection`，例如前摄和后摄分别挂载 preview/photo output，并通过多个 `NativePreviewView` 展示。
+- 该接口是后续更贴近 VisionCamera 主链路的方向；当前 CameraX 原生实验路径仍需对设备 use case 组合做降级保护。
+
+### 修复
+- 双摄并发主画面不再使用 `PreviewStatusOverlay` 展示普通状态，避免显示“预览异常：双摄并发预览...”误导用户。
+- 从双摄并发切回同源双画面时，主动清理预览错误、重置 ready 状态、暂停并延迟恢复 VisionCamera，同时刷新 `sessionRevision`，强制重建预览 session。
+- CameraX 并发 Native View 改为优先尝试当前模式的扩展组合；若 `Preview + ImageCapture` 或 `Preview + VideoCapture` 抛 `IllegalArgumentException`，自动降级绑定 `Preview + Preview`。
+- 降级后拍照/录像命令会返回“当前 camera pair 不支持双摄并发拍照/录像”的失败提示，而不是让预览直接失败。
+
+### 验证
+- [x] `npx tsc --noEmit`
+- [x] `npm test -- --runInBand`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（用户明确要求后续不需要 assemble 并安装，本轮跳过）
+
+## 2026-04-26 Bugfix 记录（双摄并发 preview-only 黑屏）
+### 问题
+- 原生 CameraX 并发 View 降级到 `Preview + Preview` 后状态显示 `bound preview-only 0 + 1`，但真机仍然黑屏。
+
+### 判断
+- `bound preview-only` 说明 CameraX 没有继续抛绑定异常，系统层也确实返回了 `0 + 1` 并发组合。
+- 但 Preview Surface 没有出帧，说明当前自建 CameraX Native View 渲染路径在该设备/当前 RN 容器内不可用或不稳定。
+- 因此不能再把这条 CameraX View 放进主产品入口，否则会继续造成主画面黑屏。
+
+### 修复
+- 主产品“拍摄源”里暂时禁用双摄并发切换，系统支持但 CameraX 渲染未通过时显示明确说明。
+- 用户点击双摄并发时不再进入黑屏 Native View，而是保持同源双画面并提示“系统返回双摄组合，但当前 CameraX 预览黑屏”。
+- 双摄并发诊断页保留，用于后续排查 CameraX View；主线真双摄应切换到 VisionCamera 官方 Multi-Camera Session API。
+
+### 文档补充
+- VisionCamera Multi-Camera 文档确认官方路径是 `VisionCamera.supportsMultiCamSessions` + `VisionCamera.createCameraSession(true)`，再通过多个 `CameraSessionConnection` 挂载前后摄 preview/photo output。
+- 后续主线不应继续依赖当前 CameraX Native View 作为产品路径。
+
+### 验证
+- [x] `npx tsc --noEmit`
+- [x] `npm test -- --runInBand`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（用户明确要求后续不需要 assemble 并安装，本轮跳过）
+## 2026-04-26 实现记录：双摄并发切换到 VisionCamera Multi-Camera
+### 背景
+- 用户明确要求不要继续使用自建原生 CameraX 并发预览路径，改用 VisionCamera 官方 Multi-Camera 方案。
+- 官方文档路径：https://visioncamera.margelo.com/docs/multi-camera
+
+### 实现
+- 新增 `src/experimental/concurrentCamera/VisionCameraMultiCamPreview.tsx`，通过 `VisionCamera.supportsMultiCamSessions` 判断能力，并使用 `VisionCamera.createCameraSession(true)` 创建 multi-camera session。
+- Multi-Camera session 内配置两个 `CameraSessionConnection`：后摄连接主 `NativePreviewView + PhotoOutput`，前摄连接 PiP `NativePreviewView + PhotoOutput`。
+- 主拍摄页进入“双摄并发”时暂停原 `useCamera` 单相机管线，避免同屏同时持有旧相机 session 和 multi-camera session。
+- 双摄并发拍照改为同时触发前/后两个 `PhotoOutput.capturePhotoToFile`，保存到 CameraRoll 并写入 Media Asset Index。
+- 删除产品链路对 `ConcurrentCameraPreviewView` / `ConcurrentCameraPreviewViewManager` / `ConcurrentCameraPreviewNative` 的依赖；`DualViewCameraPackage` 不再注册该 ViewManager。
+- 移除 `android/app/build.gradle` 中旧 CameraX 并发 View 显式依赖；系统并发能力探测仍使用 Android `CameraManager`，不依赖 CameraX View。
+- 双摄并发诊断页仅保留系统组合探测结果，不再启动原生 CameraX 预览宿主。
+
+### 规则补充
+- 后续双摄并发产品路径以 VisionCamera 官方 Multi-Camera Session 为主，不再回退到自建 CameraX Native View 作为产品预览方案。
+- 后续没有 Android/native/Gradle 改动时，不需要重新执行 `.\gradlew.bat :app:assembleDebug --console plain --stacktrace`。
+- 源码和文档必须保持 UTF-8；提交前继续扫描常见 mojibake 模式，避免再次出现中文被错误编码后的乱码。
+
+### 验证
+- [x] `npx tsc --noEmit`
+- [x] `npm test -- --runInBand`
+- [x] UTF-8 / mojibake 模式扫描无新增命中
+- [x] `git diff --check`
+- [ ] `:app:assembleDebug`（用户已要求后续不需要 assemble 并安装，本轮跳过）
+
+## 2026-04-26 Bugfix 记录：VisionCamera Multi-Camera 循环重启
+### 问题
+- 进入双摄并发后状态在“正在启动 VisionCamera Multi-Camera”和“VisionCamera Multi-Camera 已启动”之间循环。
+- 画面保持黑屏，原因是 multi-camera session 被反复 stop/start，预览 Surface 没有稳定出帧窗口。
+
+### 修复
+- 将 `CameraShell` 传给 `VisionCameraMultiCamPreview` 的 `onReadyChange` 改为 `useCallback` 稳定引用。
+- 避免 `setIsCameraReady` 触发父组件重渲染后生成新的内联回调，导致子组件 effect 依赖变化并重建 session。
+- 切入双摄并发时增加 500ms 启动节流，先让原 `useCamera` 单相机管线释放，再启动 VisionCamera Multi-Camera session，降低黑屏竞态。
+
+### 验证
+- [x] `npx tsc --noEmit`
+- [x] `npm test -- --runInBand`
+- [x] UTF-8 / mojibake 模式扫描无新增命中
+- [ ] `:app:assembleDebug`（用户已要求后续不需要 assemble 并安装，本轮跳过）

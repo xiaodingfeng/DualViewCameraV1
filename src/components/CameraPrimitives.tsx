@@ -79,7 +79,7 @@ export function PreviewStatusOverlay({ issue }: { issue: string; mode: string })
   return (
     <View pointerEvents="none" style={styles.previewStatus}>
       <Text style={styles.previewStatusTitle}>{issue ? '预览异常' : '正在启动相机'}</Text>
-      <Text style={styles.previewStatusText}>{issue || '正在绑定 CameraX 输出，请稍候。'}</Text>
+      <Text style={styles.previewStatusText}>{issue || '正在绑定相机输出，请稍候。'}</Text>
     </View>
   );
 }

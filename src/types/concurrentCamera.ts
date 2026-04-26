@@ -13,6 +13,11 @@ export type ConcurrentCameraPair = {
   supportsCompositionSettings: boolean;
 };
 
+export type ConcurrentCameraInfo = {
+  id: string;
+  facing: ConcurrentCameraFacing;
+};
+
 export type ConcurrentCameraCapabilityReason =
   | 'api-too-low'
   | 'feature-missing'
@@ -22,6 +27,9 @@ export type ConcurrentCameraCapabilityReason =
 
 export type ConcurrentCameraCapability = {
   supported: boolean;
+  androidApiLevel?: number;
+  hasConcurrentFeature?: boolean;
   reason?: ConcurrentCameraCapabilityReason;
+  cameras?: ConcurrentCameraInfo[];
   pairs: ConcurrentCameraPair[];
 };

@@ -20,18 +20,21 @@ class ConcurrentCameraModule(private val reactContext: ReactApplicationContext) 
   @ReactMethod
   fun getConcurrentCameraCapability(promise: Promise) {
     try {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-        promise.resolve(capability(false, "api-too-low", WritableNativeArray()))
-        return
-      }
-
-      val packageManager = reactContext.packageManager
-      if (!packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)) {
-        promise.resolve(capability(false, "feature-missing", WritableNativeArray()))
-        return
-      }
-
       val cameraManager = reactContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+      val cameras = availableCameras(cameraManager)
+      val hasConcurrentFeature = reactContext.packageManager
+          .hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)
+
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+        promise.resolve(capability(false, "api-too-low", hasConcurrentFeature, cameras, WritableNativeArray()))
+        return
+      }
+
+      if (!hasConcurrentFeature) {
+        promise.resolve(capability(false, "feature-missing", hasConcurrentFeature, cameras, WritableNativeArray()))
+        return
+      }
+
       val pairs = WritableNativeArray()
       cameraManager.concurrentCameraIds.forEachIndexed { index, cameraIds ->
         val ids = cameraIds.toList().sorted()
@@ -53,12 +56,24 @@ class ConcurrentCameraModule(private val reactContext: ReactApplicationContext) 
       }
 
       if (pairs.size() == 0) {
-        promise.resolve(capability(false, "no-camera-pairs", pairs))
+        promise.resolve(capability(false, "no-camera-pairs", hasConcurrentFeature, cameras, pairs))
         return
       }
-      promise.resolve(capability(true, null, pairs))
+      promise.resolve(capability(true, null, hasConcurrentFeature, cameras, pairs))
     } catch (error: Throwable) {
-      promise.resolve(capability(false, "unknown-error", WritableNativeArray()))
+      promise.resolve(
+          capability(false, "unknown-error", false, WritableNativeArray(), WritableNativeArray()))
+    }
+  }
+
+  private fun availableCameras(cameraManager: CameraManager): WritableNativeArray {
+    return WritableNativeArray().apply {
+      cameraManager.cameraIdList.sorted().forEach { cameraId ->
+        val camera = WritableNativeMap()
+        camera.putString("id", cameraId)
+        camera.putString("facing", facingForCamera(cameraManager, cameraId))
+        pushMap(camera)
+      }
     }
   }
 
@@ -79,11 +94,16 @@ class ConcurrentCameraModule(private val reactContext: ReactApplicationContext) 
   private fun capability(
       supported: Boolean,
       reason: String?,
+      hasConcurrentFeature: Boolean,
+      cameras: WritableNativeArray,
       pairs: WritableNativeArray
   ): WritableNativeMap {
     return WritableNativeMap().apply {
       putBoolean("supported", supported)
+      putInt("androidApiLevel", Build.VERSION.SDK_INT)
+      putBoolean("hasConcurrentFeature", hasConcurrentFeature)
       if (reason != null) putString("reason", reason)
+      putArray("cameras", cameras)
       putArray("pairs", pairs)
     }
   }

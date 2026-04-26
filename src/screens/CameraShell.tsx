@@ -47,6 +47,12 @@ import {
 import { GalleryView } from '../components/GalleryModal';
 import { MediaJobIndicator } from '../components/MediaJobIndicator';
 import { SettingsModal } from '../components/SettingsModal';
+import { ConcurrentCameraDebugScreen } from '../experimental/concurrentCamera/ConcurrentCameraDebugScreen';
+import {
+  VisionCameraMultiCamPreview,
+  type VisionCameraMultiCamHandle,
+  type VisionCameraMultiCamPhotoResult,
+} from '../experimental/concurrentCamera/VisionCameraMultiCamPreview';
 import { getConcurrentCameraCapability } from '../native/concurrentCamera';
 import { DualViewMedia } from '../native/dualViewMedia';
 import type { CoverTemplateSettings } from '../types/coverTemplate';
@@ -71,10 +77,12 @@ const CAPTURE_LOCATION_OPTIONS = {
   distanceFilter: 10,
   updateInterval: 10000,
 };
+const CONCURRENT_CAMERA_PRODUCT_RENDERER_READY = true;
 import { styles } from '../styles/cameraStyles';
 import type {
   AspectRatioId,
   CaptureMode,
+  CaptureSourceMode,
   FlashMode,
   GalleryMedia,
   LastMedia,
@@ -136,6 +144,7 @@ import {
 import type { DualMediaAsset } from '../types/mediaAsset';
 import {
   isAspectRatioId,
+  isCaptureSourceMode,
   isCoverTemplateSettings,
   isPhotoFormat,
   isPipLayoutConfig,
@@ -151,18 +160,22 @@ import {
 } from '../utils/settings';
 
 function CameraShell({
+                       backDevice,
                        cameraPosition,
                        captureMode,
                        device,
                        devicesCount,
+                       frontDevice,
                        microphoneReady,
                        onCaptureModeChange,
                        onSwitchCamera,
                      }: {
+  backDevice: CameraDevice | null;
   cameraPosition: CameraPosition;
   captureMode: CaptureMode;
   device: CameraDevice;
   devicesCount: number;
+  frontDevice: CameraDevice | null;
   microphoneReady: boolean;
   onCaptureModeChange: (mode: CaptureMode) => void;
   onSwitchCamera: () => void;
@@ -216,6 +229,9 @@ function CameraShell({
 
   const previewRef = useRef<PreviewView | null>(null);
   const recorderRef = useRef<Recorder | null>(null);
+  const concurrentPreviewRef = useRef<VisionCameraMultiCamHandle | null>(null);
+  const concurrentPhotoCaptureRef = useRef<{ captureId: string; createdAt: number } | null>(null);
+  const wasConcurrentSourceModeRef = useRef(false);
   const hasRequestedLocationPermissionRef = useRef(false);
   const cameraReopenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resumePreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -227,8 +243,10 @@ function CameraShell({
   const hasEnteredBackgroundRef = useRef(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>('single');
+  const [captureSourceMode, setCaptureSourceMode] = useState<CaptureSourceMode>('same-camera-crop');
   const [flashMode, setFlashMode] = useState<FlashMode>('off');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [concurrentCameraDebugOpen, setConcurrentCameraDebugOpen] = useState(false);
   const [saveDualOutputs, setSaveDualOutputs] = useState(true);
   const [shutterSoundEnabled, setShutterSoundEnabled] = useState(false);
   const [safetyOverlayMode, setSafetyOverlayMode] = useState<SafetyOverlayMode>('subtle');
@@ -261,7 +279,6 @@ function CameraShell({
   }, [captureLocation]);
 
   useEffect(() => {
-    if (!__DEV__) return;
     getConcurrentCameraCapability()
         .then(setConcurrentCameraCapability)
         .catch(() =>
@@ -273,10 +290,59 @@ function CameraShell({
         );
   }, []);
 
+  const concurrentCameraPair = useMemo(
+      () => concurrentCameraCapability?.pairs[0] ?? null,
+      [concurrentCameraCapability],
+  );
+  const isConcurrentSystemAvailable =
+      concurrentCameraCapability?.supported === true && concurrentCameraPair != null;
+  const isConcurrentSourceAvailable =
+      isConcurrentSystemAvailable &&
+      CONCURRENT_CAMERA_PRODUCT_RENDERER_READY &&
+      backDevice != null &&
+      frontDevice != null;
+  const isConcurrentSourceMode =
+      captureSourceMode === 'concurrent-cameras' && isConcurrentSourceAvailable;
+
+  const handleCaptureSourceModeChange = useCallback(
+      (mode: CaptureSourceMode) => {
+        if (isRecording) {
+          setToast('请先停止录像，再切换拍摄源');
+          return;
+        }
+        if (mode === 'concurrent-cameras' && !isConcurrentSourceAvailable) {
+          setToast(
+              isConcurrentSystemAvailable
+                  ? '系统返回双摄组合，但 VisionCamera 前后摄像头设备未就绪，已保持同源双画面'
+                  : concurrentCameraUnavailableMessage(concurrentCameraCapability),
+          );
+          return;
+        }
+        setCaptureSourceMode(mode);
+        if (mode === 'concurrent-cameras') {
+          setViewMode('dual');
+          setIsSwapped(false);
+        }
+      },
+      [concurrentCameraCapability, isConcurrentSourceAvailable, isConcurrentSystemAvailable, isRecording],
+  );
+
+  useEffect(() => {
+    if (captureSourceMode !== 'concurrent-cameras' || concurrentCameraCapability == null) return;
+    if (isConcurrentSourceAvailable) return;
+    setCaptureSourceMode('same-camera-crop');
+    setToast(
+        isConcurrentSystemAvailable
+            ? '系统返回双摄组合，但 VisionCamera 前后摄像头设备未就绪，已回到同源双画面'
+            : concurrentCameraUnavailableMessage(concurrentCameraCapability),
+    );
+  }, [captureSourceMode, concurrentCameraCapability, isConcurrentSourceAvailable, isConcurrentSystemAvailable]);
+
   const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isVideoSessionTarget, setIsVideoSessionTarget] = useState(false);
+  const [concurrentStartAllowed, setConcurrentStartAllowed] = useState(false);
 
   const isVideoSessionRequired = isRecording || pendingVideoStart;
   useEffect(() => {
@@ -459,6 +525,9 @@ function CameraShell({
           if (isVideoQuality(settings.videoQuality)) setVideoQuality(settings.videoQuality);
           if (isVideoCodecFormat(settings.videoCodec)) setVideoCodec(settings.videoCodec);
           if (isViewMode(settings.viewMode)) setViewMode(settings.viewMode);
+          if (isCaptureSourceMode(settings.captureSourceMode)) {
+            setCaptureSourceMode(settings.captureSourceMode);
+          }
           if (typeof settings.saveDualOutputs === 'boolean') setSaveDualOutputs(settings.saveDualOutputs);
           if (typeof settings.shutterSoundEnabled === 'boolean') setShutterSoundEnabled(settings.shutterSoundEnabled);
           if (isSafetyOverlayMode(settings.safetyOverlayMode)) setSafetyOverlayMode(settings.safetyOverlayMode);
@@ -534,6 +603,7 @@ function CameraShell({
       videoQuality,
       videoCodec,
       viewMode,
+      captureSourceMode,
       saveDualOutputs,
       safetyOverlayMode,
       shutterSoundEnabled,
@@ -543,6 +613,7 @@ function CameraShell({
     }).catch(() => {});
   }, [
     coverTemplate,
+    captureSourceMode,
     pipLayout,
     photoFormat,
     photoQuality,
@@ -694,6 +765,36 @@ function CameraShell({
     }, 450);
   }, []);
 
+  useEffect(() => {
+    const wasConcurrentSourceMode = wasConcurrentSourceModeRef.current;
+    wasConcurrentSourceModeRef.current = isConcurrentSourceMode;
+    if (wasConcurrentSourceMode === isConcurrentSourceMode) return;
+
+    setPreviewIssue('');
+    setFocusPoint(null);
+    setIsCameraReady(false);
+    setPendingPhotoCapture(false);
+    setPendingVideoStart(false);
+    setConcurrentStartAllowed(false);
+
+    if (isConcurrentSourceMode) {
+      setSessionRevision(curr => curr + 1);
+      const timer = setTimeout(() => {
+        setConcurrentStartAllowed(true);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+
+    setIsAppActive(false);
+    const timer = setTimeout(() => {
+      if (appStateRef.current !== 'active') return;
+      setSessionRevision(curr => curr + 1);
+      setIsAppActive(true);
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [isConcurrentSourceMode]);
+
   const scheduleResumePreviewRefresh = useCallback(() => {
     if (resumePreviewTimerRef.current != null) {
       clearTimeout(resumePreviewTimerRef.current);
@@ -715,6 +816,10 @@ function CameraShell({
   const handleCameraStarted = useCallback(() => {
     setPreviewIssue('');
     setIsCameraReady(true);
+  }, []);
+
+  const handleConcurrentReadyChange = useCallback((ready: boolean) => {
+    setIsCameraReady(ready);
   }, []);
 
   const handleCameraError = useCallback(
@@ -739,7 +844,7 @@ function CameraShell({
     device,
     outputs,
     constraints: cameraConstraints,
-    isActive: isAppActive && !galleryOpen,
+    isActive: isAppActive && !galleryOpen && !concurrentCameraDebugOpen && !isConcurrentSourceMode,
     orientationSource: 'device',
     mirrorMode: cameraPosition === 'front' ? 'on' : 'off',
     getInitialZoom,
@@ -1857,7 +1962,79 @@ function CameraShell({
       [device.maxZoom, device.minZoom],
   );
 
-  const primaryAction = captureMode === 'photo' ? takePhoto : toggleRecording;
+  const handleConcurrentPhotoCaptured = useCallback(
+      async (result: VisionCameraMultiCamPhotoResult) => {
+        const captureMeta = concurrentPhotoCaptureRef.current ?? {
+          captureId: createCaptureId(),
+          createdAt: Date.now(),
+        };
+        concurrentPhotoCaptureRef.current = null;
+
+        try {
+          const [primarySaved, secondarySaved] = await Promise.all([
+            saveToGallery(result.backPath, 'photo', '双摄后摄'),
+            saveToGallery(result.frontPath, 'photo', '双摄前摄'),
+          ]);
+          await saveCaptureGroupToIndex({
+            captureId: captureMeta.captureId,
+            createdAt: captureMeta.createdAt,
+            assets: [
+              buildReadyAsset({
+                captureId: captureMeta.captureId,
+                createdAt: captureMeta.createdAt,
+                type: 'photo',
+                role: 'main',
+                aspect: '16:9',
+                uri: primarySaved.uri,
+                localPath: primarySaved.localPath,
+                sourceUri: toFileUri(result.backPath),
+              }),
+              buildReadyAsset({
+                captureId: captureMeta.captureId,
+                createdAt: captureMeta.createdAt,
+                type: 'photo',
+                role: 'sub',
+                aspect: '16:9',
+                uri: secondarySaved.uri,
+                localPath: secondarySaved.localPath,
+                sourceUri: toFileUri(result.frontPath),
+              }),
+            ],
+          });
+          refreshGallery().catch(() => {});
+          setToast('双摄并发照片已保存');
+        } catch (error) {
+          setToast(cameraErrorMessage(error, '双摄并发拍照失败'));
+        } finally {
+          setIsBusy(false);
+        }
+      },
+      [refreshGallery, saveCaptureGroupToIndex, saveToGallery],
+  );
+
+  const handleConcurrentPrimaryAction = useCallback(() => {
+    if (isBusy) return;
+    if (captureMode === 'video') {
+      setToast('VisionCamera Multi-Camera 预览和拍照已接入，录像继续后续接入');
+      return;
+    }
+    concurrentPhotoCaptureRef.current = {
+      captureId: createCaptureId(),
+      createdAt: Date.now(),
+    };
+    setIsBusy(true);
+    concurrentPreviewRef.current?.capturePhoto().catch(error => {
+      concurrentPhotoCaptureRef.current = null;
+      setToast(cameraErrorMessage(error, '双摄并发拍照失败'));
+      setIsBusy(false);
+    });
+  }, [captureMode, isBusy]);
+
+  const primaryAction = isConcurrentSourceMode
+      ? handleConcurrentPrimaryAction
+      : captureMode === 'photo'
+          ? takePhoto
+          : toggleRecording;
 
   return (
       <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
@@ -1875,7 +2052,25 @@ function CameraShell({
                 lastPinchDist.current = null;
               }}
           >
-            {viewMode === 'dual' && previewLayoutTemplate !== 'pip' ? (
+            {isConcurrentSourceMode ? (
+                <>
+                  <VisionCameraMultiCamPreview
+                      ref={concurrentPreviewRef}
+                      active={
+                        concurrentStartAllowed &&
+                        isAppActive &&
+                        !galleryOpen &&
+                        !settingsOpen &&
+                        !concurrentCameraDebugOpen
+                      }
+                      backDevice={backDevice}
+                      frontDevice={frontDevice}
+                      onError={setToast}
+                      onPhotoCaptured={handleConcurrentPhotoCaptured}
+                      onReadyChange={handleConcurrentReadyChange}
+                  />
+                </>
+            ) : viewMode === 'dual' && previewLayoutTemplate !== 'pip' ? (
                 <TemplateDualPreview
                     layoutId={previewLayoutTemplate}
                     mainCropSpec={mainFrameSpec}
@@ -1916,9 +2111,9 @@ function CameraShell({
                 />
             )}
 
-            <Pressable style={styles.focusLayer} onPress={focusAtPoint} />
-            {focusPoint && <FocusBox point={focusPoint} />}
-            {previewIssue ? <PreviewStatusOverlay issue={previewIssue} mode="" /> : null}
+            {!isConcurrentSourceMode && <Pressable style={styles.focusLayer} onPress={focusAtPoint} />}
+            {!isConcurrentSourceMode && focusPoint && <FocusBox point={focusPoint} />}
+            {!isConcurrentSourceMode && previewIssue ? <PreviewStatusOverlay issue={previewIssue} mode="" /> : null}
 
             <TopBar
                 aspectId={selectedAspectId}
@@ -1937,7 +2132,7 @@ function CameraShell({
                 videoQuality={videoQuality}
             />
 
-            {viewMode === 'dual' && previewLayoutTemplate === 'pip' && (
+            {!isConcurrentSourceMode && viewMode === 'dual' && previewLayoutTemplate === 'pip' && (
                 <PipPreview
                     aspectRatio={subFrameSpec.aspect}
                     cropSpec={subFrameSpec}
@@ -1975,7 +2170,7 @@ function CameraShell({
             {toast ? <Toast message={toast} /> : null}
             <MediaJobIndicator jobs={mediaJobs} />
 
-            <View style={styles.zoomBarContainer} pointerEvents="box-none">
+            {!isConcurrentSourceMode && <View style={styles.zoomBarContainer} pointerEvents="box-none">
               <ZoomSelector
                   currentZoom={zoom}
                   onChange={setZoom}
@@ -1987,7 +2182,7 @@ function CameraShell({
                     isZoomGestureActiveRef.current = active;
                   }}
               />
-            </View>
+            </View>}
           </View>
 
           <BottomControls
@@ -2019,10 +2214,16 @@ function CameraShell({
             device={device}
             devicesCount={devicesCount}
             capabilities={capabilities}
+            captureSourceMode={captureSourceMode}
             concurrentCameraCapability={concurrentCameraCapability}
             flashMode={flashMode}
             onClose={() => setSettingsOpen(false)}
+            onCaptureSourceModeChange={handleCaptureSourceModeChange}
             onFlashModeChange={setFlashMode}
+            onOpenConcurrentCameraDebug={() => {
+              setSettingsOpen(false);
+              setConcurrentCameraDebugOpen(true);
+            }}
             open={settingsOpen}
             photoFormat={photoFormat}
             onPhotoFormatChange={setPhotoFormat}
@@ -2047,8 +2248,29 @@ function CameraShell({
             onVideoQualityChange={setVideoQuality}
             viewMode={viewMode}
         />
+        <ConcurrentCameraDebugScreen
+            capability={concurrentCameraCapability}
+            open={concurrentCameraDebugOpen}
+            onClose={() => setConcurrentCameraDebugOpen(false)}
+        />
       </SafeAreaView>
   );
+}
+
+function concurrentCameraUnavailableMessage(capability: ConcurrentCameraCapability | null): string {
+  if (capability == null) return '正在探测双摄并发能力';
+  switch (capability.reason) {
+    case 'api-too-low':
+      return '当前 Android 版本不支持双摄并发';
+    case 'feature-missing':
+      return '当前设备未声明双摄并发能力';
+    case 'no-camera-pairs':
+      return '当前设备没有可用的双摄并发组合';
+    case 'camerax-unavailable':
+      return '系统双摄并发暂不可用';
+    default:
+      return '双摄并发能力探测失败';
+  }
 }
 
 export default CameraShell;

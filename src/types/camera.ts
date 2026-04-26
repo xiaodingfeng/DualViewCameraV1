@@ -3,6 +3,7 @@ import type { CoverTemplateSettings } from './coverTemplate';
 
 export type CaptureMode = 'photo' | 'video';
 export type ViewMode = 'single' | 'dual';
+export type CaptureSourceMode = 'same-camera-crop' | 'concurrent-cameras';
 export type FrameOrientation = 'portrait' | 'landscape';
 export type FlashMode = 'off' | 'on' | 'auto';
 export type LastMedia = { uri: string; type: 'photo' | 'video'; label: string } | null;
@@ -53,6 +54,7 @@ export type PersistedSettings = Partial<{
   videoQuality: VideoQuality;
   videoCodec: VideoCodecFormat;
   viewMode: ViewMode;
+  captureSourceMode: CaptureSourceMode;
   saveDualOutputs: boolean;
   shutterSoundEnabled: boolean;
   safetyOverlayMode: SafetyOverlayMode;
