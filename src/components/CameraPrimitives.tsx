@@ -8,6 +8,8 @@ import {
   StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { NativePreviewView } from 'react-native-vision-camera';
 
@@ -17,7 +19,8 @@ import FlashOnIcon from '../../assets/icons/flash-on.svg';
 import SettingsIcon from '../../assets/icons/settings.svg';
 import SwitchCameraIcon from '../../assets/icons/switch.svg';
 
-import { ASPECT_RATIOS, PX_PER_ZOOM, VIDEO_QUALITY_CONFIG, ZOOM_BAR_WIDTH } from '../config/camera';
+import { CompositionOverlay } from './CompositionOverlay';
+import { ASPECT_RATIOS, PX_PER_ZOOM, TOP_BAR_OFFSET, VIDEO_QUALITY_CONFIG, ZOOM_BAR_WIDTH } from '../config/camera';
 import { styles } from '../styles/cameraStyles';
 import type {
   AspectRatioId,
@@ -25,9 +28,14 @@ import type {
   FlashMode,
   FrameOrientation,
   LastMedia,
+  PipAnchor,
+  PipLayoutConfig,
+  PreviewLayoutTemplateId,
+  SafetyOverlayMode,
   VideoFps,
   VideoQuality,
 } from '../types/camera';
+import type { CropSpec } from '../types/composition';
 import {
   calculateContainedFrame,
   clamp,
@@ -231,28 +239,278 @@ export function BottomControls({
   );
 }
 
+function TemplatePreviewPane({
+  cropSpec,
+  hybridRef,
+  isRecording,
+  overlayMode,
+  previewOutput,
+  role,
+  sessionRevision,
+  style,
+}: {
+  cropSpec: CropSpec;
+  hybridRef?: unknown;
+  isRecording: boolean;
+  overlayMode: SafetyOverlayMode;
+  previewOutput: any | null;
+  role: 'main' | 'sub';
+  sessionRevision: number;
+  style: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.templatePane, style]}>
+      {previewOutput ? (
+        <NativePreviewView
+          key={`${role}-template-${sessionRevision}`}
+          style={StyleSheet.absoluteFill}
+          previewOutput={previewOutput}
+          resizeMode="cover"
+          implementationMode="compatible"
+          hybridRef={hybridRef as never}
+        />
+      ) : (
+        <View style={styles.pipPlaceholder}>
+          <Text style={styles.pipPlaceholderText}>{role === 'main' ? '主画面' : '副画面'}</Text>
+        </View>
+      )}
+      <CompositionOverlay crop={cropSpec} isRecording={isRecording} mode={overlayMode} role={role} />
+    </View>
+  );
+}
+
+export function TemplateDualPreview({
+  layoutId,
+  mainCropSpec,
+  mainHybridRef,
+  mainPreviewOutput,
+  overlayMode,
+  subCropSpec,
+  subPreviewOutput,
+  isRecording,
+  sessionRevision,
+}: {
+  layoutId: Exclude<PreviewLayoutTemplateId, 'pip'>;
+  mainCropSpec: CropSpec;
+  mainHybridRef: unknown;
+  mainPreviewOutput: any | null;
+  overlayMode: SafetyOverlayMode;
+  subCropSpec: CropSpec;
+  subPreviewOutput: any | null;
+  isRecording: boolean;
+  sessionRevision: number;
+}) {
+  const isHorizontal = layoutId === 'split-horizontal';
+  const isVertical = layoutId === 'split-vertical';
+
+  if (layoutId === 'stack') {
+    return (
+      <View pointerEvents="none" style={styles.templateLayer}>
+        <TemplatePreviewPane
+          cropSpec={mainCropSpec}
+          hybridRef={mainHybridRef}
+          isRecording={isRecording}
+          overlayMode={overlayMode}
+          previewOutput={mainPreviewOutput}
+          role="main"
+          sessionRevision={sessionRevision}
+          style={styles.stackMainPane}
+        />
+        <TemplatePreviewPane
+          cropSpec={subCropSpec}
+          isRecording={isRecording}
+          overlayMode={overlayMode}
+          previewOutput={subPreviewOutput}
+          role="sub"
+          sessionRevision={sessionRevision}
+          style={styles.stackSubPane}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.templateLayer,
+        isHorizontal && styles.templateSplitHorizontal,
+        isVertical && styles.templateSplitVertical,
+      ]}
+    >
+      <TemplatePreviewPane
+        cropSpec={mainCropSpec}
+        hybridRef={mainHybridRef}
+        isRecording={isRecording}
+        overlayMode={overlayMode}
+        previewOutput={mainPreviewOutput}
+        role="main"
+        sessionRevision={sessionRevision}
+        style={styles.templateSplitPane}
+      />
+      <TemplatePreviewPane
+        cropSpec={subCropSpec}
+        isRecording={isRecording}
+        overlayMode={overlayMode}
+        previewOutput={subPreviewOutput}
+        role="sub"
+        sessionRevision={sessionRevision}
+        style={styles.templateSplitPane}
+      />
+    </View>
+  );
+}
+
+const PIP_DRAG_THRESHOLD = 8;
+const PIP_MARGIN_X = 18;
+const PIP_TOP_MARGIN = TOP_BAR_OFFSET + 58;
+const PIP_BOTTOM_MARGIN = 228;
+const PIP_SCALE_FACTORS = {
+  small: 0.86,
+  medium: 1,
+  large: 1.15,
+} as const;
+
+function scaledPipFrameSize(aspectRatio: number, scale: PipLayoutConfig['scale']) {
+  const base = pipFrameSize(aspectRatio);
+  const factor = PIP_SCALE_FACTORS[scale];
+  return {
+    width: Math.round(base.width * factor),
+    height: Math.round(base.height * factor),
+  };
+}
+
+function pipAnchorPosition(
+  layout: PipLayoutConfig,
+  previewSize: { width: number; height: number },
+  pipSize: { width: number; height: number },
+) {
+  const maxLeft = Math.max(0, previewSize.width - pipSize.width);
+  const maxTop = Math.max(0, previewSize.height - pipSize.height);
+  const left = layout.anchor.endsWith('right') ? maxLeft - layout.marginX : layout.marginX;
+  const top = layout.anchor.startsWith('bottom') ? maxTop - layout.marginY : layout.marginY;
+
+  return {
+    left: clamp(left, 0, maxLeft),
+    top: clamp(top, 0, maxTop),
+  };
+}
+
+function nearestPipAnchor(
+  left: number,
+  top: number,
+  previewSize: { width: number; height: number },
+  pipSize: { width: number; height: number },
+): PipAnchor {
+  const centerX = left + pipSize.width / 2;
+  const centerY = top + pipSize.height / 2;
+  const vertical = centerY < previewSize.height / 2 ? 'top' : 'bottom';
+  const horizontal = centerX < previewSize.width / 2 ? 'left' : 'right';
+  return `${vertical}-${horizontal}` as PipAnchor;
+}
+
 export function PipPreview({
   aspectRatio,
+  cropSpec,
   isSwapped,
+  isRecording,
   orientation,
   onPress,
+  overlayMode,
+  layout,
+  onGestureActiveChange,
+  onLayoutChange,
   previewOutput,
+  previewSize,
   sessionRevision,
   placeholderMode,
 }: {
   aspectRatio: number;
+  cropSpec: CropSpec;
   isSwapped: boolean;
+  isRecording: boolean;
   orientation: FrameOrientation;
   onPress: () => void;
+  overlayMode: SafetyOverlayMode;
+  layout: PipLayoutConfig;
+  onGestureActiveChange?: (active: boolean) => void;
+  onLayoutChange: (layout: PipLayoutConfig) => void;
   previewOutput: any | null;
+  previewSize: { width: number; height: number };
   sessionRevision: number;
   placeholderMode: 'photo' | 'video' | null;
 }) {
-  const pipSize = useMemo(() => pipFrameSize(aspectRatio), [aspectRatio]);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const draggedRef = useRef(false);
+  const pipSize = useMemo(() => scaledPipFrameSize(aspectRatio, layout.scale), [aspectRatio, layout.scale]);
+  const anchorPosition = useMemo(
+    () => pipAnchorPosition(layout, previewSize, pipSize),
+    [layout, pipSize, previewSize.height, previewSize.width],
+  );
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          Math.abs(gesture.dx) > PIP_DRAG_THRESHOLD || Math.abs(gesture.dy) > PIP_DRAG_THRESHOLD,
+        onPanResponderGrant: () => {
+          draggedRef.current = false;
+          onGestureActiveChange?.(true);
+          setDragOffset({ x: 0, y: 0 });
+        },
+        onPanResponderMove: (_event, gesture) => {
+          if (Math.abs(gesture.dx) > PIP_DRAG_THRESHOLD || Math.abs(gesture.dy) > PIP_DRAG_THRESHOLD) {
+            draggedRef.current = true;
+          }
+          setDragOffset({ x: gesture.dx, y: gesture.dy });
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          const wasDragged = draggedRef.current;
+          draggedRef.current = false;
+          onGestureActiveChange?.(false);
+          setDragOffset({ x: 0, y: 0 });
+
+          if (!wasDragged) {
+            onPress();
+            return;
+          }
+
+          const maxLeft = Math.max(0, previewSize.width - pipSize.width);
+          const maxTop = Math.max(0, previewSize.height - pipSize.height);
+          const nextLeft = clamp(anchorPosition.left + gesture.dx, 0, maxLeft);
+          const nextTop = clamp(anchorPosition.top + gesture.dy, 0, maxTop);
+          const nextAnchor = nearestPipAnchor(nextLeft, nextTop, previewSize, pipSize);
+
+          onLayoutChange({
+            ...layout,
+            anchor: nextAnchor,
+            marginX: PIP_MARGIN_X,
+            marginY: nextAnchor.startsWith('top') ? PIP_TOP_MARGIN : PIP_BOTTOM_MARGIN,
+          });
+        },
+        onPanResponderTerminate: () => {
+          draggedRef.current = false;
+          onGestureActiveChange?.(false);
+          setDragOffset({ x: 0, y: 0 });
+        },
+      }),
+    [anchorPosition.left, anchorPosition.top, layout, onGestureActiveChange, onLayoutChange, onPress, pipSize, previewSize],
+  );
   const placeholderTitle = placeholderMode === 'photo' ? '拍照中' : '录制中';
 
   return (
-    <View style={[styles.pip, pipSize]}>
+    <View
+      {...panResponder.panHandlers}
+      style={[
+        styles.pip,
+        pipSize,
+        {
+          left: anchorPosition.left,
+          top: anchorPosition.top,
+          transform: [{ translateX: dragOffset.x }, { translateY: dragOffset.y }],
+        },
+      ]}
+    >
       {previewOutput ? (
         <NativePreviewView
           key={`pip-${sessionRevision}`}
@@ -273,20 +531,24 @@ export function PipPreview({
           )}
         </View>
       )}
+      <CompositionOverlay crop={cropSpec} isRecording={isRecording} mode={overlayMode} role="sub" />
       <Text style={styles.pipLabel}>
         {placeholderMode ? placeholderTitle : isSwapped ? '主画面' : `副 ${formatAspectLabel(aspectRatio)}`}
       </Text>
-      <Pressable style={styles.pipTouchLayer} onPress={onPress} />
+      <View pointerEvents="none" style={styles.pipTouchLayer} />
     </View>
   );
 }
 
 export function MainPreview({
   bottomOffset,
+  cropSpec,
   fillScreen,
   frame,
   hybridRef,
+  isRecording,
   orientation,
+  overlayMode,
   aspectRatio,
   previewOutput,
   sessionRevision,
@@ -295,9 +557,12 @@ export function MainPreview({
 }: {
   fillScreen: boolean;
   bottomOffset: number;
+  cropSpec: CropSpec;
   frame: { width: any; height: any };
   hybridRef: unknown;
+  isRecording: boolean;
   orientation: FrameOrientation;
+  overlayMode: SafetyOverlayMode;
   aspectRatio?: number;
   previewOutput: any;
   sessionRevision: number;
@@ -334,6 +599,7 @@ export function MainPreview({
             </View>
           </View>
         )}
+        <CompositionOverlay crop={cropSpec} isRecording={isRecording} mode={overlayMode} role="main" />
       </View>
     </View>
   );

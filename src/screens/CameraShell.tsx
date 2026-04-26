@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { callback } from 'react-native-nitro-modules';
+import { useLocation } from 'react-native-vision-camera-location';
 import {
   CommonResolutions,
   type CameraDevice,
@@ -38,25 +39,48 @@ import {
   MainPreview,
   PipPreview,
   PreviewStatusOverlay,
+  TemplateDualPreview,
   Toast,
   TopBar,
   ZoomSelector,
 } from '../components/CameraPrimitives';
 import { GalleryView } from '../components/GalleryModal';
+import { MediaJobIndicator } from '../components/MediaJobIndicator';
 import { SettingsModal } from '../components/SettingsModal';
 import { DualViewMedia } from '../native/dualViewMedia';
+import type { CoverTemplateSettings } from '../types/coverTemplate';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const DEFAULT_PIP_LAYOUT: PipLayoutConfig = {
+  anchor: 'bottom-right',
+  scale: 'medium',
+  marginX: 18,
+  marginY: 228,
+};
+const DEFAULT_PREVIEW_LAYOUT_TEMPLATE: PreviewLayoutTemplateId = 'pip';
+const DEFAULT_COVER_TEMPLATE: CoverTemplateSettings = {
+  templateId: 'none',
+  dateWatermarkEnabled: true,
+  infoWatermarkEnabled: true,
+  title: 'Dual View',
+};
+const CAPTURE_LOCATION_OPTIONS = {
+  accuracy: 'balanced' as const,
+  distanceFilter: 10,
+  updateInterval: 10000,
+};
 import { styles } from '../styles/cameraStyles';
 import type {
   AspectRatioId,
   CaptureMode,
   FlashMode,
-  FrameOrientation,
   GalleryMedia,
   LastMedia,
+  PipLayoutConfig,
   PhotoFormat,
   PhotoQuality,
+  PreviewLayoutTemplateId,
+  SafetyOverlayMode,
   VideoCodecFormat,
   VideoFps,
   VideoQuality,
@@ -70,9 +94,16 @@ import {
   isCameraResourceBusyError,
   videoFpsOptionsForQuality,
   videoTargetSizeForAspect,
-  visibleFrameSpec,
   wait,
 } from '../utils/camera';
+import {
+  buildCameraCapabilities,
+  resolveDualViewVideoSettingsForStability,
+  resolveSettingsForCapabilities,
+} from '../utils/cameraCapabilities';
+import { createCaptureId } from '../utils/captureId';
+import { buildCompositionScene } from '../utils/composition';
+import { createCoverForPhoto } from '../utils/coverGenerator';
 import {
   cameraRollNodeToGalleryMedia,
   createDualPhotoVariantsForAspects,
@@ -84,9 +115,31 @@ import {
   toFileUri,
 } from '../utils/gallery';
 import {
+  buildFailedAsset,
+  buildReadyAsset,
+  upsertCaptureGroup,
+} from '../utils/mediaIndex';
+import type { MediaJob } from '../types/mediaJob';
+import {
+  createMediaJob,
+  loadMediaJobs,
+  markStaleRunningJobs,
+  runQueuedMediaJob,
+  saveMediaJobs,
+  updateMediaJob,
+  updateMediaJobInList,
+  upsertMediaJob,
+  upsertMediaJobInList,
+} from '../utils/mediaJobQueue';
+import type { DualMediaAsset } from '../types/mediaAsset';
+import {
   isAspectRatioId,
+  isCoverTemplateSettings,
   isPhotoFormat,
+  isPipLayoutConfig,
+  isPreviewLayoutTemplateId,
   isPhotoQuality,
+  isSafetyOverlayMode,
   isVideoCodecFormat,
   isVideoFps,
   isVideoQuality,
@@ -121,6 +174,11 @@ function CameraShell({
   const [appliedVideoFps, setAppliedVideoFps] = useState<VideoFps>(30);
   const [appliedVideoQuality, setAppliedVideoQuality] = useState<VideoQuality>('4K');
   const [videoCodec, setVideoCodec] = useState<VideoCodecFormat>('h265');
+  const [pipLayout, setPipLayout] = useState<PipLayoutConfig>(DEFAULT_PIP_LAYOUT);
+  const [previewLayoutTemplate, setPreviewLayoutTemplate] = useState<PreviewLayoutTemplateId>(
+    DEFAULT_PREVIEW_LAYOUT_TEMPLATE,
+  );
+  const [coverTemplate, setCoverTemplate] = useState<CoverTemplateSettings>(DEFAULT_COVER_TEMPLATE);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -129,6 +187,7 @@ function CameraShell({
       () => ASPECT_RATIOS.find(item => item.id === selectedAspectId) ?? ASPECT_RATIOS[2],
       [selectedAspectId],
   );
+  const capabilities = useMemo(() => buildCameraCapabilities(device), [device]);
   const photoQualityConfig = PHOTO_QUALITY_CONFIG[photoQuality];
   const appliedVideoQualityConfig = VIDEO_QUALITY_CONFIG[appliedVideoQuality];
 
@@ -151,9 +210,11 @@ function CameraShell({
     enableAudio: microphoneReady,
     enablePersistentRecorder: false,
   });
+  const captureLocation = useLocation(CAPTURE_LOCATION_OPTIONS);
 
   const previewRef = useRef<PreviewView | null>(null);
   const recorderRef = useRef<Recorder | null>(null);
+  const hasRequestedLocationPermissionRef = useRef(false);
   const cameraReopenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resumePreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,6 +229,7 @@ function CameraShell({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveDualOutputs, setSaveDualOutputs] = useState(true);
   const [shutterSoundEnabled, setShutterSoundEnabled] = useState(false);
+  const [safetyOverlayMode, setSafetyOverlayMode] = useState<SafetyOverlayMode>('subtle');
 
   const [zoom, setZoom] = useState(() => clamp(1, device.minZoom, device.maxZoom));
   const [isRulerMode, setIsRulerMode] = useState(false);
@@ -187,6 +249,13 @@ function CameraShell({
   const [galleryItems, setGalleryItems] = useState<GalleryMedia[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
+
+  useEffect(() => {
+    if (captureLocation.hasPermission || hasRequestedLocationPermissionRef.current) return;
+    hasRequestedLocationPermissionRef.current = true;
+    captureLocation.requestPermission().catch(() => {});
+  }, [captureLocation]);
+  const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isVideoSessionTarget, setIsVideoSessionTarget] = useState(false);
@@ -209,6 +278,7 @@ function CameraShell({
   const isBusyRef = useRef(isBusy);
   const isRecordingRef = useRef(isRecording);
   const isZoomGestureActiveRef = useRef(false);
+  const isPipGestureActiveRef = useRef(false);
 
   useEffect(() => {
     isBusyRef.current = isBusy;
@@ -217,6 +287,24 @@ function CameraShell({
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadMediaJobs()
+      .then(jobs => {
+        const recoveredJobs = markStaleRunningJobs(jobs);
+        if (!cancelled) {
+          setMediaJobs(recoveredJobs);
+        }
+        if (recoveredJobs.some((job, index) => job !== jobs[index])) {
+          saveMediaJobs(recoveredJobs).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refreshGallery = useCallback(async () => {
     const items = await loadDualViewGallery();
@@ -254,6 +342,7 @@ function CameraShell({
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_, gestureState) => {
           if (isZoomGestureActiveRef.current) return false;
+          if (isPipGestureActiveRef.current) return false;
           // If gallery is open and we are at the first item, capture right swipes to allow closing
           if (isGalleryOpenRef.current && galleryIndexRef.current === 0 && gestureState.dx > 40 && Math.abs(gestureState.dy) < 30) {
             return true;
@@ -262,7 +351,7 @@ function CameraShell({
         },
         onMoveShouldSetPanResponder: (_, gestureState) => {
           const { dx, dy } = gestureState;
-          if (isBusyRef.current || isRecordingRef.current || isZoomGestureActiveRef.current) return false;
+          if (isBusyRef.current || isRecordingRef.current || isZoomGestureActiveRef.current || isPipGestureActiveRef.current) return false;
 
           if (isGalleryOpenRef.current) {
             return dx > 30 && Math.abs(dy) < 40 && galleryIndexRef.current === 0;
@@ -354,6 +443,12 @@ function CameraShell({
           if (isViewMode(settings.viewMode)) setViewMode(settings.viewMode);
           if (typeof settings.saveDualOutputs === 'boolean') setSaveDualOutputs(settings.saveDualOutputs);
           if (typeof settings.shutterSoundEnabled === 'boolean') setShutterSoundEnabled(settings.shutterSoundEnabled);
+          if (isSafetyOverlayMode(settings.safetyOverlayMode)) setSafetyOverlayMode(settings.safetyOverlayMode);
+          if (isPipLayoutConfig(settings.pipLayout)) setPipLayout(settings.pipLayout);
+          if (isPreviewLayoutTemplateId(settings.previewLayoutTemplate)) {
+            setPreviewLayoutTemplate(settings.previewLayoutTemplate);
+          }
+          if (isCoverTemplateSettings(settings.coverTemplate)) setCoverTemplate(settings.coverTemplate);
         })
         .finally(() => {
           if (!cancelled) setSettingsLoaded(true);
@@ -367,6 +462,52 @@ function CameraShell({
   useEffect(() => {
     if (!settingsLoaded) return;
 
+    const { patch, messages } = resolveSettingsForCapabilities(capabilities, {
+      flashMode,
+      photoFormat,
+      videoCodec,
+      videoFps,
+      videoQuality,
+    });
+
+    if (patch.flashMode != null) setFlashMode(patch.flashMode);
+    if (patch.photoFormat != null) setPhotoFormat(patch.photoFormat);
+    if (patch.videoFps != null) setVideoFps(patch.videoFps);
+    if (patch.videoQuality != null) setVideoQuality(patch.videoQuality);
+    if (patch.videoCodec != null) setVideoCodec(patch.videoCodec);
+    if (messages.length > 0) setToast(messages[0]);
+  }, [
+    capabilities,
+    flashMode,
+    photoFormat,
+    settingsLoaded,
+    videoCodec,
+    videoFps,
+    videoQuality,
+  ]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+
+    const dualViewResolution = resolveDualViewVideoSettingsForStability({
+      viewMode,
+      videoFps,
+      videoQuality,
+    });
+    if (dualViewResolution.patch.videoFps != null) {
+      setVideoFps(dualViewResolution.patch.videoFps);
+    }
+    if (dualViewResolution.patch.videoQuality != null) {
+      setVideoQuality(dualViewResolution.patch.videoQuality);
+    }
+    if (dualViewResolution.message != null) {
+      setToast(dualViewResolution.message);
+    }
+  }, [settingsLoaded, videoFps, videoQuality, viewMode]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+
     savePersistedSettings({
       selectedAspectId,
       photoQuality,
@@ -376,15 +517,23 @@ function CameraShell({
       videoCodec,
       viewMode,
       saveDualOutputs,
+      safetyOverlayMode,
       shutterSoundEnabled,
+      pipLayout,
+      previewLayoutTemplate,
+      coverTemplate,
     }).catch(() => {});
   }, [
+    coverTemplate,
+    pipLayout,
     photoFormat,
     photoQuality,
     saveDualOutputs,
+    safetyOverlayMode,
     selectedAspectId,
     settingsLoaded,
     shutterSoundEnabled,
+    previewLayoutTemplate,
     videoCodec,
     videoFps,
     videoQuality,
@@ -394,55 +543,40 @@ function CameraShell({
   const isDeviceLandscape = physicalOrientation === 'left' || physicalOrientation === 'right';
   const shouldMirrorSavedPhoto = cameraPosition === 'front';
   const captureOutputOrientation: Orientation | null = physicalOrientation ?? null;
-  const displayPrimaryOrientation: FrameOrientation = 'portrait';
-  const displaySecondaryOrientation: FrameOrientation = 'landscape';
-  const savePrimaryOrientation: FrameOrientation = isDeviceLandscape ? 'landscape' : 'portrait';
-  const saveSecondaryOrientation: FrameOrientation = isDeviceLandscape ? 'portrait' : 'landscape';
-
-  const mainDisplayOrientation: FrameOrientation =
-      viewMode === 'dual'
-          ? (isSwapped ? displaySecondaryOrientation : displayPrimaryOrientation)
-          : displayPrimaryOrientation;
-
-  const subDisplayOrientation: FrameOrientation =
-      viewMode === 'dual'
-          ? (isSwapped ? displayPrimaryOrientation : displaySecondaryOrientation)
-          : displaySecondaryOrientation;
-
   const fullMainAspect =
       previewSize.width > 0 && previewSize.height > 0
           ? previewSize.width / Math.max(1, previewSize.height)
           : 9 / 16;
 
-  const mainFrameSpec = useMemo(
-      () => visibleFrameSpec(mainDisplayOrientation, selectedAspect, fullMainAspect),
-      [fullMainAspect, mainDisplayOrientation, selectedAspect],
+  const compositionScene = useMemo(
+      () =>
+          buildCompositionScene({
+            viewMode,
+            selectedAspect,
+            isSwapped,
+            isDeviceLandscape,
+            fullMainAspect,
+            saveDualOutputs,
+          }),
+      [
+        fullMainAspect,
+        isDeviceLandscape,
+        isSwapped,
+        saveDualOutputs,
+        selectedAspect,
+        viewMode,
+      ],
   );
 
-  const subFrameSpec = useMemo(
-      () => visibleFrameSpec(subDisplayOrientation, selectedAspect, 3 / 4),
-      [selectedAspect, subDisplayOrientation],
-  );
-
-  const saveMainOrientation: FrameOrientation =
-      viewMode === 'dual'
-          ? (isSwapped ? saveSecondaryOrientation : savePrimaryOrientation)
-          : savePrimaryOrientation;
-
-  const saveSubOrientation: FrameOrientation =
-      viewMode === 'dual'
-          ? (isSwapped ? savePrimaryOrientation : saveSecondaryOrientation)
-          : saveSecondaryOrientation;
-
-  const saveMainFrameSpec = useMemo(
-      () => visibleFrameSpec(saveMainOrientation, selectedAspect, fullMainAspect),
-      [fullMainAspect, saveMainOrientation, selectedAspect],
-  );
-
-  const saveSubFrameSpec = useMemo(
-      () => visibleFrameSpec(saveSubOrientation, selectedAspect, 3 / 4),
-      [saveSubOrientation, selectedAspect],
-  );
+  const mainDisplayOrientation = compositionScene.display.main.orientation;
+  const subDisplayOrientation =
+      compositionScene.display.sub?.orientation ?? 'landscape';
+  const mainFrameSpec = compositionScene.display.main;
+  const subFrameSpec = compositionScene.display.sub ?? compositionScene.save.sub;
+  const saveMainOrientation = compositionScene.save.main.orientation;
+  const saveSubOrientation = compositionScene.save.sub.orientation;
+  const saveMainFrameSpec = compositionScene.save.main;
+  const saveSubFrameSpec = compositionScene.save.sub;
   const shouldRotateMainLandscapeFallback = isDeviceLandscape && saveMainOrientation === 'landscape';
   const shouldRotateSubLandscapeFallback = isDeviceLandscape && saveSubOrientation === 'landscape';
 
@@ -822,9 +956,71 @@ function CameraShell({
         const saved = await CameraRoll.saveAsset(uri, { type, album: 'DualViewCamera' });
         setLastMedia(mediaToLastMedia(cameraRollNodeToGalleryMedia(saved)));
         refreshGallery().catch(() => {});
-        return saved.node.image.uri;
+        return {
+          uri: saved.node.image.uri,
+          localPath: sourcePath,
+        };
       },
       [refreshGallery],
+  );
+
+  const saveCaptureGroupToIndex = useCallback(
+      async (input: {
+        captureId: string;
+        createdAt: number;
+        assets: DualMediaAsset[];
+      }) => {
+        if (input.assets.length === 0) return;
+        await upsertCaptureGroup({
+          captureId: input.captureId,
+          createdAt: input.createdAt,
+          mode: viewMode,
+          outputPackId:
+              viewMode === 'dual' && saveDualOutputs ? 'dual-main-sub' : 'current-only',
+          assets: input.assets,
+        });
+      },
+      [saveDualOutputs, viewMode],
+  );
+
+  const createAndSaveCoverAsset = useCallback(
+      async (input: {
+        captureId: string;
+        createdAt: number;
+        dual: boolean;
+        mainLocalPath: string;
+        sourceUri: string;
+      }): Promise<DualMediaAsset | null> => {
+        if (coverTemplate.templateId === 'none') return null;
+        try {
+          const coverTitle = coverTemplate.title.trim() || (input.dual ? 'Dual View' : 'Agile');
+          const coverPath = await createCoverForPhoto({
+            sourcePath: input.mainLocalPath,
+            settings: coverTemplate,
+            title: coverTitle,
+            infoText: `${selectedAspectId} ${input.dual ? 'Dual' : 'Single'}`,
+            createdAt: input.createdAt,
+          });
+          if (coverPath == null) return null;
+          const coverSaved = await saveToGallery(coverPath, 'photo', '封面');
+          return buildReadyAsset({
+            captureId: input.captureId,
+            createdAt: input.createdAt,
+            type: 'cover',
+            role: 'cover',
+            aspect: '16:9',
+            uri: coverSaved.uri,
+            localPath: coverSaved.localPath,
+          sourceUri: input.sourceUri,
+          templateId: coverTemplate.templateId,
+          title: coverTitle,
+        });
+        } catch (error) {
+          setToast(cameraErrorMessage(error, '封面生成失败'));
+          return null;
+        }
+      },
+      [coverTemplate, saveToGallery, selectedAspectId, setToast],
   );
 
   const saveCapturedPhotoInBackground = useCallback(
@@ -840,9 +1036,37 @@ function CameraShell({
             rotateLandscapeFallback: { main: boolean; sub: boolean };
           },
       ) => {
+        const captureId = createCaptureId();
+        const createdAt = Date.now();
+        const job = createMediaJob({
+          captureId,
+          type: options.dual ? 'photo-pack' : 'photo-variant',
+          input: {
+            sourceUri: filePath,
+            aspect: selectedAspectId,
+            format: options.format,
+            dual: options.dual,
+            mainSpec: options.mainSpec,
+            subSpec: options.subSpec,
+            quality: options.quality,
+            mirror: options.mirror,
+            rotateLandscapeFallback: options.rotateLandscapeFallback,
+          },
+        });
+        const applyJobPatch = async (
+            patch: Partial<Omit<MediaJob, 'id' | 'captureId' | 'type' | 'createdAt'>>,
+        ) => {
+          setMediaJobs(previous => updateMediaJobInList(previous, job.id, patch));
+          const jobs = await updateMediaJob(job.id, patch);
+          setMediaJobs(jobs);
+        };
         void (async () => {
           try {
-            if (options.dual) {
+            setMediaJobs(previous => upsertMediaJobInList(previous, job));
+            await upsertMediaJob(job);
+            await runQueuedMediaJob(async () => {
+              await applyJobPatch({ status: 'running', progress: 0.08 });
+              if (options.dual) {
               const { mainPath, subPath } = await createDualPhotoVariantsForAspects(
                   filePath,
                   options.mainSpec,
@@ -852,11 +1076,55 @@ function CameraShell({
                   options.mirror,
                   options.rotateLandscapeFallback,
               );
+              await applyJobPatch({ status: 'running', progress: 0.45 });
 
-              await Promise.all([
+              const [mainSaved, subSaved] = await Promise.all([
                 saveToGallery(mainPath, 'photo', '主画面'),
                 saveToGallery(subPath, 'photo', '副画面'),
               ]);
+              const coverAsset = await createAndSaveCoverAsset({
+                captureId,
+                createdAt,
+                dual: true,
+                mainLocalPath: mainSaved.localPath ?? mainPath,
+                sourceUri: filePath,
+              });
+              await applyJobPatch({ status: 'running', progress: 0.78 });
+              await saveCaptureGroupToIndex({
+                captureId,
+                createdAt,
+                assets: [
+                  buildReadyAsset({
+                    captureId,
+                    createdAt,
+                    type: 'photo',
+                    role: 'main',
+                    aspect: selectedAspectId,
+                    uri: mainSaved.uri,
+                    localPath: mainSaved.localPath,
+                    sourceUri: filePath,
+                  }),
+                  buildReadyAsset({
+                    captureId,
+                    createdAt,
+                    type: 'photo',
+                    role: 'sub',
+                    aspect: selectedAspectId,
+                    uri: subSaved.uri,
+                    localPath: subSaved.localPath,
+                    sourceUri: filePath,
+                  }),
+                  ...(coverAsset ? [coverAsset] : []),
+                ],
+              });
+              await applyJobPatch({
+                status: 'succeeded',
+                progress: 1,
+                output: {
+                  mainUri: mainSaved.uri,
+                  subUri: subSaved.uri,
+                },
+              });
             } else {
               const mainPath = await createPhotoVariantForAspect(
                   filePath,
@@ -867,14 +1135,69 @@ function CameraShell({
                   options.mirror,
                   options.rotateLandscapeFallback.main,
               );
-              await saveToGallery(mainPath, 'photo', '主画面');
+              await applyJobPatch({ status: 'running', progress: 0.55 });
+              await applyJobPatch({ status: 'running', progress: 0.82 });
+              const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
+              const coverAsset = await createAndSaveCoverAsset({
+                captureId,
+                createdAt,
+                dual: false,
+                mainLocalPath: mainSaved.localPath ?? mainPath,
+                sourceUri: filePath,
+              });
+              await saveCaptureGroupToIndex({
+                captureId,
+                createdAt,
+                assets: [
+                  buildReadyAsset({
+                    captureId,
+                    createdAt,
+                    type: 'photo',
+                    role: 'main',
+                    aspect: selectedAspectId,
+                    uri: mainSaved.uri,
+                    localPath: mainSaved.localPath,
+                    sourceUri: filePath,
+                  }),
+                  ...(coverAsset ? [coverAsset] : []),
+                ],
+              });
+              await applyJobPatch({
+                status: 'succeeded',
+                progress: 1,
+                output: {
+                  uri: mainSaved.uri,
+                  localPath: mainSaved.localPath,
+                },
+              });
             }
+            });
           } catch (error) {
-            setToast(cameraErrorMessage(error, '照片保存失败'));
+            const message = cameraErrorMessage(error, '照片保存失败');
+            await applyJobPatch({
+              status: 'failed',
+              errorMessage: message,
+            }).catch(() => {});
+            await saveCaptureGroupToIndex({
+              captureId,
+              createdAt,
+              assets: [
+                buildFailedAsset({
+                  captureId,
+                  createdAt,
+                  type: 'photo',
+                  role: options.dual ? 'sub' : 'main',
+                  aspect: selectedAspectId,
+                  sourceUri: filePath,
+                  errorMessage: message,
+                }),
+              ],
+            }).catch(() => {});
+            setToast(message);
           }
         })();
       },
-      [saveToGallery],
+      [createAndSaveCoverAsset, saveCaptureGroupToIndex, saveToGallery, selectedAspectId, setMediaJobs],
   );
 
   const prepareFlashForPhoto = useCallback(async () => {
@@ -919,6 +1242,7 @@ function CameraShell({
           {
             flashMode: device?.hasFlash ? flashMode : 'off',
             enableShutterSound: shutterSoundEnabled,
+            ...(captureLocation.currentLocation ? { location: captureLocation.currentLocation } : {}),
           },
           {},
       );
@@ -944,6 +1268,7 @@ function CameraShell({
     }
   }, [
     captureMode,
+    captureLocation.currentLocation,
     cleanupFlashAfterPhoto,
     captureOutputOrientation,
     device?.hasFlash,
@@ -975,16 +1300,60 @@ function CameraShell({
 
   const finishRecording = useCallback(
       async (filePath: string) => {
+        const captureId = createCaptureId();
+        const createdAt = Date.now();
         let originalSaved = false;
         try {
-          await saveToGallery(filePath, 'video', '主画面');
+          const mainSaved = await saveToGallery(filePath, 'video', '主画面');
           originalSaved = true;
+          await saveCaptureGroupToIndex({
+            captureId,
+            createdAt,
+            assets: [
+              buildReadyAsset({
+                captureId,
+                createdAt,
+                type: 'video',
+                role: 'main',
+                aspect: selectedAspectId,
+                uri: mainSaved.uri,
+                localPath: mainSaved.localPath,
+                sourceUri: filePath,
+              }),
+            ],
+          });
           setToast(viewMode === 'dual' && saveDualOutputs ? '主画面视频已保存，副画面稍后后台处理' : '视频已保存');
 
           if (viewMode === 'dual' && saveDualOutputs) {
             void (async () => {
+              const job = createMediaJob({
+                captureId,
+                type: 'video-variant',
+                input: {
+                  sourceUri: filePath,
+                  role: 'sub',
+                  codec: videoCodec,
+                  aspect: selectedAspectId,
+                  variant: saveSubFrameSpec.variant,
+                  targetSize: videoFrameSize(saveSubFrameSpec),
+                  rotateLandscapeFallback: shouldRotateSubLandscapeFallback,
+                },
+              });
+              const applyJobPatch = async (
+                  patch: Partial<Omit<MediaJob, 'id' | 'captureId' | 'type' | 'createdAt'>>,
+              ) => {
+                setMediaJobs(previous => updateMediaJobInList(previous, job.id, patch));
+                const jobs = await updateMediaJob(job.id, patch);
+                setMediaJobs(jobs);
+              };
+
               try {
+                setMediaJobs(previous => upsertMediaJobInList(previous, job));
+                await upsertMediaJob(job);
+                await runQueuedMediaJob(async () => {
+                await applyJobPatch({ status: 'running', progress: 0.08 });
                 const subVariant = saveSubFrameSpec.variant;
+                await applyJobPatch({ status: 'running', progress: 0.35 });
                 const subPath = await createVideoVariant(
                     filePath,
                     subVariant,
@@ -994,9 +1363,55 @@ function CameraShell({
                     false,
                     shouldRotateSubLandscapeFallback,
                 );
-                await saveToGallery(subPath, 'video', '副画面');
+                await applyJobPatch({ status: 'running', progress: 0.72 });
+                const subSaved = await saveToGallery(subPath, 'video', '副画面');
+                await saveCaptureGroupToIndex({
+                  captureId,
+                  createdAt,
+                  assets: [
+                    buildReadyAsset({
+                      captureId,
+                      createdAt,
+                      type: 'video',
+                      role: 'sub',
+                      aspect: selectedAspectId,
+                      uri: subSaved.uri,
+                      localPath: subSaved.localPath,
+                      sourceUri: filePath,
+                    }),
+                  ],
+                });
                 setToast('副画面视频已保存');
-              } catch {
+                await applyJobPatch({
+                  status: 'succeeded',
+                  progress: 1,
+                  output: {
+                    uri: subSaved.uri,
+                    localPath: subSaved.localPath,
+                  },
+                });
+                });
+              } catch (error) {
+                const message = cameraErrorMessage(error, '副画面视频后台处理失败');
+                await applyJobPatch({
+                  status: 'failed',
+                  errorMessage: message,
+                }).catch(() => {});
+                await saveCaptureGroupToIndex({
+                  captureId,
+                  createdAt,
+                  assets: [
+                    buildFailedAsset({
+                      captureId,
+                      createdAt,
+                      type: 'video',
+                      role: 'sub',
+                      aspect: selectedAspectId,
+                      sourceUri: filePath,
+                      errorMessage: message,
+                    }),
+                  ],
+                }).catch(() => {});
                 setToast('副画面视频后台处理失败，已保留主画面视频');
               }
             })();
@@ -1005,7 +1420,223 @@ function CameraShell({
           setToast(originalSaved ? '副画面视频后台处理失败，已保留主画面视频' : '录像保存失败');
         }
       },
-      [saveDualOutputs, saveToGallery, saveSubFrameSpec, shouldRotateSubLandscapeFallback, videoCodec, videoFrameSize, viewMode],
+      [
+        saveCaptureGroupToIndex,
+        saveDualOutputs,
+        saveToGallery,
+        saveSubFrameSpec,
+        selectedAspectId,
+        shouldRotateSubLandscapeFallback,
+        setMediaJobs,
+        videoCodec,
+        videoFrameSize,
+        viewMode,
+      ],
+  );
+
+  const retryMediaJob = useCallback(
+      (job: MediaJob) => {
+        void (async () => {
+          const applyJobPatch = async (
+              patch: Partial<Omit<MediaJob, 'id' | 'captureId' | 'type' | 'createdAt'>>,
+          ) => {
+            setMediaJobs(previous => updateMediaJobInList(previous, job.id, patch));
+            const jobs = await updateMediaJob(job.id, patch);
+            setMediaJobs(jobs);
+          };
+          const sourceUri = typeof job.input.sourceUri === 'string' ? job.input.sourceUri : '';
+          if (!sourceUri) {
+            await applyJobPatch({
+              status: 'failed',
+              errorMessage: '缺少源文件，无法重试',
+            }).catch(() => {});
+            setToast('缺少源文件，无法重试');
+            return;
+          }
+
+          try {
+            await applyJobPatch({
+              status: 'queued',
+              progress: 0,
+              errorMessage: undefined,
+              retryCount: job.retryCount + 1,
+            });
+            await runQueuedMediaJob(async () => {
+              await applyJobPatch({ status: 'running', progress: 0.08 });
+              if (job.type === 'video-variant') {
+                const targetSize = job.input.targetSize as { width?: number; height?: number } | undefined;
+                const subPath = await createVideoVariant(
+                    sourceUri,
+                    (job.input.variant as VisibleFrameSpec['variant']) ?? 'landscape',
+                    'sub',
+                    {
+                      width: Number(targetSize?.width ?? 1280),
+                      height: Number(targetSize?.height ?? 720),
+                    },
+                    (job.input.codec as VideoCodecFormat) ?? videoCodec,
+                    false,
+                    Boolean(job.input.rotateLandscapeFallback),
+                );
+                await applyJobPatch({ status: 'running', progress: 0.72 });
+                const subSaved = await saveToGallery(subPath, 'video', '副画面');
+                await saveCaptureGroupToIndex({
+                  captureId: job.captureId,
+                  createdAt: job.createdAt,
+                  assets: [
+                    buildReadyAsset({
+                      captureId: job.captureId,
+                      createdAt: job.createdAt,
+                      type: 'video',
+                      role: 'sub',
+                      aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                      uri: subSaved.uri,
+                      localPath: subSaved.localPath,
+                      sourceUri,
+                    }),
+                  ],
+                });
+                await applyJobPatch({
+                  status: 'succeeded',
+                  progress: 1,
+                  output: { uri: subSaved.uri, localPath: subSaved.localPath },
+                });
+                setToast('副画面视频已保存');
+                return;
+              }
+
+              const mainSpec = job.input.mainSpec as VisibleFrameSpec | undefined;
+              const subSpec = job.input.subSpec as VisibleFrameSpec | undefined;
+              const rotateLandscapeFallback =
+                  job.input.rotateLandscapeFallback as { main?: boolean; sub?: boolean } | undefined;
+              if (!mainSpec) {
+                throw new Error('缺少照片构图参数');
+              }
+              const format = (job.input.format as PhotoFormat) ?? photoFormat;
+              const quality = Number(job.input.quality ?? photoQualityConfig.nativeQuality);
+              const mirror = Boolean(job.input.mirror);
+              if (job.type === 'photo-pack') {
+                if (!subSpec) {
+                  throw new Error('缺少副画面构图参数');
+                }
+                const { mainPath, subPath } = await createDualPhotoVariantsForAspects(
+                    sourceUri,
+                    mainSpec,
+                    subSpec,
+                    format,
+                    quality,
+                    mirror,
+                    {
+                      main: Boolean(rotateLandscapeFallback?.main),
+                      sub: Boolean(rotateLandscapeFallback?.sub),
+                    },
+                );
+                await applyJobPatch({ status: 'running', progress: 0.45 });
+                const [mainSaved, subSaved] = await Promise.all([
+                  saveToGallery(mainPath, 'photo', '主画面'),
+                  saveToGallery(subPath, 'photo', '副画面'),
+                ]);
+                await saveCaptureGroupToIndex({
+                  captureId: job.captureId,
+                  createdAt: job.createdAt,
+                  assets: [
+                    buildReadyAsset({
+                      captureId: job.captureId,
+                      createdAt: job.createdAt,
+                      type: 'photo',
+                      role: 'main',
+                      aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                      uri: mainSaved.uri,
+                      localPath: mainSaved.localPath,
+                      sourceUri,
+                    }),
+                    buildReadyAsset({
+                      captureId: job.captureId,
+                      createdAt: job.createdAt,
+                      type: 'photo',
+                      role: 'sub',
+                      aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                      uri: subSaved.uri,
+                      localPath: subSaved.localPath,
+                      sourceUri,
+                    }),
+                  ],
+                });
+                await applyJobPatch({
+                  status: 'succeeded',
+                  progress: 1,
+                  output: { mainUri: mainSaved.uri, subUri: subSaved.uri },
+                });
+                setToast('照片组已保存');
+                return;
+              }
+
+              const mainPath = await createPhotoVariantForAspect(
+                  sourceUri,
+                  mainSpec,
+                  'main',
+                  format,
+                  quality,
+                  mirror,
+                  Boolean(rotateLandscapeFallback?.main),
+              );
+              const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
+              await saveCaptureGroupToIndex({
+                captureId: job.captureId,
+                createdAt: job.createdAt,
+                assets: [
+                  buildReadyAsset({
+                    captureId: job.captureId,
+                    createdAt: job.createdAt,
+                    type: 'photo',
+                    role: 'main',
+                    aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                    uri: mainSaved.uri,
+                    localPath: mainSaved.localPath,
+                    sourceUri,
+                  }),
+                ],
+              });
+              await applyJobPatch({
+                status: 'succeeded',
+                progress: 1,
+                output: { uri: mainSaved.uri, localPath: mainSaved.localPath },
+              });
+              setToast('照片已保存');
+            });
+          } catch (error) {
+            const message = cameraErrorMessage(error, '重试失败');
+            await applyJobPatch({
+              status: 'failed',
+              errorMessage: message,
+            }).catch(() => {});
+            await saveCaptureGroupToIndex({
+              captureId: job.captureId,
+              createdAt: job.createdAt,
+              assets: [
+                buildFailedAsset({
+                  captureId: job.captureId,
+                  createdAt: job.createdAt,
+                  type: job.type === 'video-variant' ? 'video' : 'photo',
+                  role: job.type === 'photo-variant' ? 'main' : 'sub',
+                  aspect: (job.input.aspect as typeof selectedAspectId) ?? selectedAspectId,
+                  sourceUri,
+                  errorMessage: message,
+                }),
+              ],
+            }).catch(() => {});
+            setToast(message);
+          }
+        })();
+      },
+      [
+        photoFormat,
+        photoQualityConfig.nativeQuality,
+        saveCaptureGroupToIndex,
+        saveToGallery,
+        selectedAspectId,
+        setMediaJobs,
+        videoCodec,
+      ],
   );
 
   const toggleRecording = useCallback(async () => {
@@ -1042,7 +1673,9 @@ function CameraShell({
         videoOutput.outputOrientation = captureOutputOrientation;
       }
 
-      const recorder = await videoOutput.createRecorder({});
+      const recorder = await videoOutput.createRecorder(
+          captureLocation.currentLocation ? { location: captureLocation.currentLocation } : {},
+      );
       recorderRef.current = recorder;
 
       await recorder.startRecording(
@@ -1076,6 +1709,7 @@ function CameraShell({
     appliedVideoQuality,
     captureMode,
     captureOutputOrientation,
+    captureLocation.currentLocation,
     finishRecording,
     isBusy,
     isRecording,
@@ -1223,21 +1857,46 @@ function CameraShell({
                 lastPinchDist.current = null;
               }}
           >
-            <MainPreview
-                hybridRef={previewHybridRef}
-                orientation={mainDisplayOrientation}
-                aspectRatio={mainPreviewAspect}
-                frame={mainPreviewFrame}
-                bottomOffset={mainPreviewBottomOffset}
-                topOffset={previewTopOffset}
-                fillScreen={isFullPreview}
-                previewOutput={mainPreviewOutput}
-                sessionRevision={sessionRevision}
-                isTransitioning={
-                    !isCameraReady ||
-                    isSwitching
-                }
-            />
+            {viewMode === 'dual' && previewLayoutTemplate !== 'pip' ? (
+                <TemplateDualPreview
+                    layoutId={previewLayoutTemplate}
+                    mainCropSpec={mainFrameSpec}
+                    mainHybridRef={previewHybridRef}
+                    mainPreviewOutput={mainPreviewOutput}
+                    overlayMode={safetyOverlayMode}
+                    subCropSpec={subFrameSpec}
+                    subPreviewOutput={
+                      captureMode === 'photo'
+                          ? pendingPhotoCapture
+                              ? null
+                              : pipPreviewOutput
+                          : isVideoSessionTarget
+                              ? null
+                              : pipPreviewOutput
+                    }
+                    isRecording={isRecording}
+                    sessionRevision={sessionRevision}
+                />
+            ) : (
+                <MainPreview
+                    hybridRef={previewHybridRef}
+                    cropSpec={mainFrameSpec}
+                    orientation={mainDisplayOrientation}
+                    aspectRatio={mainPreviewAspect}
+                    frame={mainPreviewFrame}
+                    isRecording={isRecording}
+                    overlayMode={safetyOverlayMode}
+                    bottomOffset={mainPreviewBottomOffset}
+                    topOffset={previewTopOffset}
+                    fillScreen={isFullPreview}
+                    previewOutput={mainPreviewOutput}
+                    sessionRevision={sessionRevision}
+                    isTransitioning={
+                        !isCameraReady ||
+                        isSwitching
+                    }
+                />
+            )}
 
             <Pressable style={styles.focusLayer} onPress={focusAtPoint} />
             {focusPoint && <FocusBox point={focusPoint} />}
@@ -1260,12 +1919,20 @@ function CameraShell({
                 videoQuality={videoQuality}
             />
 
-            {viewMode === 'dual' && (
+            {viewMode === 'dual' && previewLayoutTemplate === 'pip' && (
                 <PipPreview
                     aspectRatio={subFrameSpec.aspect}
+                    cropSpec={subFrameSpec}
                     isSwapped={isSwapped}
+                    isRecording={isRecording}
                     orientation={subDisplayOrientation}
                     onPress={swapMainAndSub}
+                    overlayMode={safetyOverlayMode}
+                    layout={pipLayout}
+                    onGestureActiveChange={active => {
+                      isPipGestureActiveRef.current = active;
+                    }}
+                    onLayoutChange={setPipLayout}
                     previewOutput={
                       captureMode === 'photo'
                           ? pendingPhotoCapture
@@ -1275,6 +1942,7 @@ function CameraShell({
                               ? null
                               : pipPreviewOutput
                     }
+                    previewSize={previewSize}
                     sessionRevision={sessionRevision}
                     placeholderMode={
                       captureMode === 'photo' && pendingPhotoCapture
@@ -1287,6 +1955,7 @@ function CameraShell({
             )}
 
             {toast ? <Toast message={toast} /> : null}
+            <MediaJobIndicator jobs={mediaJobs} />
 
             <View style={styles.zoomBarContainer} pointerEvents="box-none">
               <ZoomSelector
@@ -1319,9 +1988,11 @@ function CameraShell({
           <GalleryView
               index={galleryIndex}
               items={galleryItems}
+              mediaJobs={mediaJobs}
               onClose={closeGallery}
               onDelete={handleGalleryDelete}
               onIndexChange={setGalleryIndex}
+              onRetryMediaJob={retryMediaJob}
               translateX={panX}
           />
         </View>
@@ -1329,6 +2000,7 @@ function CameraShell({
         <SettingsModal
             device={device}
             devicesCount={devicesCount}
+            capabilities={capabilities}
             flashMode={flashMode}
             onClose={() => setSettingsOpen(false)}
             onFlashModeChange={setFlashMode}
@@ -1338,6 +2010,12 @@ function CameraShell({
             photoQuality={photoQuality}
             onPhotoQualityChange={setPhotoQuality}
             saveDualOutputs={saveDualOutputs}
+            safetyOverlayMode={safetyOverlayMode}
+            onSafetyOverlayModeChange={setSafetyOverlayMode}
+            coverTemplate={coverTemplate}
+            onCoverTemplateChange={setCoverTemplate}
+            previewLayoutTemplate={previewLayoutTemplate}
+            onPreviewLayoutTemplateChange={setPreviewLayoutTemplate}
             setSaveDualOutputs={setSaveDualOutputs}
             shutterSoundEnabled={shutterSoundEnabled}
             onShutterSoundEnabledChange={setShutterSoundEnabled}

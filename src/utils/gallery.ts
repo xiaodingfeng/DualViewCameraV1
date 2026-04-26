@@ -12,6 +12,7 @@ import type {
   VisibleFrameSpec,
 } from '../types/camera';
 import { slugify } from './camera';
+import { enrichGalleryMediaWithIndex, loadMediaIndex } from './mediaIndex';
 
 export async function requestGalleryReadPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
@@ -45,12 +46,15 @@ export async function loadDualViewGallery(): Promise<GalleryMedia[]> {
       groupName: 'DualViewCamera',
       include: ['filename', 'fileSize', 'imageSize', 'playableDuration'],
     });
-    const items = result.edges.map(cameraRollNodeToGalleryMedia).filter(Boolean) as GalleryMedia[];
-    if (!DualViewMedia?.getMediaStoragePath) return items;
+    const rawItems = result.edges.map(cameraRollNodeToGalleryMedia).filter(Boolean) as GalleryMedia[];
+    const groups = await loadMediaIndex();
+    if (!DualViewMedia?.getMediaStoragePath) {
+      return enrichGalleryMediaWithIndex(rawItems, groups);
+    }
 
     const getMediaStoragePath = DualViewMedia?.getMediaStoragePath;
-    return Promise.all(
-      items.map(async item => {
+    const itemsWithPaths = await Promise.all(
+      rawItems.map(async item => {
         if (!getMediaStoragePath) return item;
         try {
           const filepath = await getMediaStoragePath(item.uri);
@@ -60,6 +64,7 @@ export async function loadDualViewGallery(): Promise<GalleryMedia[]> {
         }
       }),
     );
+    return enrichGalleryMediaWithIndex(itemsWithPaths, groups);
   } catch {
     return [];
   }

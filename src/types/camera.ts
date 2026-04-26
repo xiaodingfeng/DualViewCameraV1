@@ -1,4 +1,5 @@
 import type { ViewProps } from 'react-native';
+import type { CoverTemplateSettings } from './coverTemplate';
 
 export type CaptureMode = 'photo' | 'video';
 export type ViewMode = 'single' | 'dual';
@@ -16,6 +17,14 @@ export type GalleryMedia = {
   height: number;
   duration: number;
   timestamp: number;
+  captureId?: string;
+  captureRole?: 'main' | 'sub' | 'vertical' | 'horizontal' | 'square' | 'source' | 'cover';
+  captureGroupSize?: number;
+  captureGroupCreatedAt?: number;
+  captureStatus?: 'processing' | 'ready' | 'failed';
+  templateId?: string;
+  title?: string;
+  errorMessage?: string;
 };
 
 export type AspectRatioId = 'full' | '1:1' | '4:3' | '16:9';
@@ -24,6 +33,16 @@ export type PhotoFormat = 'jpeg' | 'heic';
 export type VideoQuality = '720' | '1080' | '4K' | '8K';
 export type VideoFps = 30 | 60;
 export type VideoCodecFormat = 'h265' | 'h264';
+export type SafetyOverlayMode = 'off' | 'subtle' | 'strong';
+export type PipAnchor = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+export type PipScale = 'small' | 'medium' | 'large';
+export type PreviewLayoutTemplateId = 'pip' | 'split-horizontal' | 'split-vertical' | 'stack';
+export type PipLayoutConfig = {
+  anchor: PipAnchor;
+  scale: PipScale;
+  marginX: number;
+  marginY: number;
+};
 export type PhotoVariant = 'full' | 'portrait' | 'landscape' | 'square' | 'photo4x3' | 'video16x9';
 export type VisibleFrameSpec = { aspect: number; variant: PhotoVariant };
 export type PersistedSettings = Partial<{
@@ -36,6 +55,10 @@ export type PersistedSettings = Partial<{
   viewMode: ViewMode;
   saveDualOutputs: boolean;
   shutterSoundEnabled: boolean;
+  safetyOverlayMode: SafetyOverlayMode;
+  pipLayout: PipLayoutConfig;
+  previewLayoutTemplate: PreviewLayoutTemplateId;
+  coverTemplate: CoverTemplateSettings;
 }>;
 
 export type NativeVideoViewProps = ViewProps & { sourceUri: string };

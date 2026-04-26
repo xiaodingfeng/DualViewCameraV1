@@ -109,6 +109,12 @@ cd android
 .\gradlew.bat :app:assembleDebug --console plain --stacktrace
 ```
 
+验证规则补充：
+
+- 如果本轮没有修改 `android/`、Gradle 配置、原生模块、依赖版本或会影响 APK 打包的配置文件，可以不重新执行 `.\gradlew.bat :app:assembleDebug --console plain --stacktrace`。
+- 仅修改 TypeScript / React Native JS / 文档 / Jest 测试时，默认执行 `npm test -- --runInBand` 和 `npx tsc --noEmit`；是否需要 Android Debug 构建按变更风险单独判断并在记录中说明。
+- 修改 `CameraShell.tsx` 等相机主链路 JS 文件时，至少必须执行 `npm test -- --runInBand` 和 `npx tsc --noEmit`；Android 构建仅在涉及 Android 代码、依赖、打包配置或需要验证 APK 内置 bundle 时执行。
+
 真机回归重点：
 
 - 首次启动权限申请。
@@ -147,7 +153,7 @@ cd android
 - 不要无意义重排 import、样式对象和大型 JSX。
 - 只格式化本次改动触及的局部区域。
 - 如果需要引入 Prettier，先单独提交“格式化配置”，不要和业务变更混合。
-- 相机主链路文件如 `CameraShell.tsx` 每次改动后必须重新跑 TypeScript 和 Android Debug 构建。
+- 相机主链路文件如 `CameraShell.tsx` 每次改动后必须重新跑 TypeScript；如果没有 Android 代码、依赖、Gradle 或打包配置改动，可以不跑 Android Debug 构建，但必须在升级记录中说明跳过原因。
 
 ### 0.6 文档同步规则
 
@@ -218,7 +224,7 @@ android/app/src/main/java/com/dualviewcamerav1init/
 - 双画面录像副画面后台处理只有轻量提示，缺少任务队列、进度、失败重试。
 - 设置页仍偏功能枚举，缺少按设备能力动态显隐的统一能力服务。
 - PiP 位置和布局模板还不够可玩，目前更像固定画中画。
-- 裁切安全框 / 多平台输出包 / 局部特写尚未产品化。
+- 裁切安全框 / 多平台输出包 / 封面水印模板尚未产品化。
 
 ---
 
@@ -234,9 +240,9 @@ android/app/src/main/java/com/dualviewcamerav1init/
 2. **Media Asset Index**：将一次拍摄的主图、副图、原始源文件、封面、视频变体组织成一个 `captureId`。
 3. **Media Job Queue**：照片裁切、视频转码、相册入库、封面生成后台任务化。
 4. **Safety Overlay**：显示真实成片安全框和裁切遮罩，降低构图误解。
-5. **Template System**：支持 PiP、左右分屏、上下分屏、多平台素材包、局部特写。
+5. **Template System**：支持 PiP、左右分屏、上下分屏、多平台素材包、封面水印。
 6. **Capability Service**：按设备能力动态显示设置和降级输出。
-7. **Creative Modes**：多平台素材包、局部特写、封面、水印、Vlog 模板。
+7. **Creative Modes**：多平台素材包、封面、水印、Vlog 模板。
 
 ---
 
@@ -252,7 +258,6 @@ android/app/src/main/java/com/dualviewcamerav1init/
 | Phase 5 | P1 | Media Job Queue | 视频/图片处理任务化、可提示、可重试 |
 | Phase 6 | P1 | PiP 可拖拽与模板化布局 | 增强创作可玩性 |
 | Phase 7 | P1 | 设备能力服务 | 设置页动态能力显隐与安全降级 |
-| Phase 8 | P2 | 局部特写副画面 | 同源双画面差异化能力 |
 | Phase 9 | P2 | 封面与水印模板 | 提升分享完成度 |
 | Phase 10 | P2 | 双摄并发能力探测与实验隔离 | 先验证设备支持、CameraX API、独立 Native View，不进入主路径 |
 | Phase 11 | P2/P3 | 双摄并发产品化支持 | 在最后阶段支持前后摄并发拍摄、预览、保存与降级回退 |
@@ -314,8 +319,7 @@ export type CompositionLayoutId =
   | 'pip'
   | 'split-horizontal'
   | 'split-vertical'
-  | 'stack'
-  | 'detail-zoom';
+  | 'stack';
 
 export type CompositionOutputKind = 'photo' | 'video' | 'cover';
 
@@ -814,68 +818,13 @@ export interface CameraCapabilities {
 
 ---
 
-## 12. Phase 8：局部特写副画面
+## 12. Phase 9：封面与水印模板
 
 ### 12.1 目标
 
-利用同源裁切优势，新增“主画面全景 + 副画面局部放大”模式。
-
-### 12.2 功能定义
-
-新增布局：`detail-zoom`
-
-- 主画面：完整构图。
-- 副画面：从同一源画面中裁切局部区域，显示 2x 或 3x 特写。
-- 用户可拖动副画面取景区域。
-- 保存时输出：
-  - 主画面照片。
-  - 局部特写照片。
-
-### 12.3 新增类型
-
-```ts
-export interface DetailZoomConfig {
-  zoomScale: 2 | 3 | 4;
-  normalizedCenterX: number;
-  normalizedCenterY: number;
-}
-```
-
-### 12.4 实现阶段
-
-第一阶段：静态中心特写
-
-- [ ] 副画面固定显示中心 2x 裁切。
-- [ ] 保存副图时按中心 2x 区域裁切。
-
-第二阶段：可移动特写区域
-
-- [ ] 主画面增加一个可拖动的小框，表示特写区域。
-- [ ] 副画面实时显示该区域。
-- [ ] 取景区域归一化保存到 settings。
-
-### 12.5 技术注意
-
-- 不要用高频 JS 截帧实现实时副画面。
-- 预览可以先复用同源第二 PreviewOutput，仅改变容器裁切和 transform。
-- 保存必须走原生裁切，保证输出质量。
-
-### 12.6 验收标准
-
-- [ ] `detail-zoom` 模式下主画面和副画面明显不同。
-- [ ] 副画面特写保存结果和预览基本一致。
-- [ ] 不影响普通 PiP 模式。
-- [ ] 不出现 Worklets 相关依赖或红屏。
-
----
-
-## 13. Phase 9：封面与水印模板
-
-### 13.1 目标
-
 为拍摄内容自动生成可分享封面，增强“拍完即分享”。
 
-### 13.2 第一批能力
+### 12.2 第一批能力
 
 - [ ] 自动生成双画面拼贴封面。
 - [ ] 支持日期水印。
@@ -883,7 +832,7 @@ export interface DetailZoomConfig {
 - [ ] 支持简单标题：用户可在 Gallery 中编辑。
 - [ ] 封面保存为独立 `cover` asset，加入 capture group。
 
-### 13.3 新增文件
+### 12.3 新增文件
 
 ```text
 src/types/coverTemplate.ts
@@ -892,7 +841,7 @@ src/utils/coverGenerator.ts
 src/components/CoverEditor.tsx
 ```
 
-### 13.4 初始模板
+### 12.4 初始模板
 
 ```ts
 export type CoverTemplateId =
@@ -902,13 +851,13 @@ export type CoverTemplateId =
   | 'vlog-title';
 ```
 
-### 13.5 实现策略
+### 12.5 实现策略
 
 - 第一版优先用 React Native SVG 或原生 Bitmap 合成。
 - 如果依赖过重，不新增大体积第三方库。
 - 先支持照片封面，视频封面可后续从主视频第一帧或主图生成。
 
-### 13.6 验收标准
+### 12.6 验收标准
 
 - [ ] 拍照后能生成封面图。
 - [ ] 封面进入 Gallery group。
@@ -1321,9 +1270,8 @@ Codex 执行时建议严格按以下顺序小步提交：
 14. `CameraShell.tsx` 逐步迁移保存 / 转码逻辑
 15. `compositionTemplates.ts` 和模板 UI
 16. `cameraCapabilities.ts` 能力服务
-17. 局部特写
-18. 封面水印
-19. 实验真双摄
+17. 封面水印
+18. 实验真双摄
 
 ---
 
@@ -1487,7 +1435,6 @@ cd android
 - [ ] PiP 可拖动、可吸附、可保存位置。
 - [ ] 可切换至少 3 种布局模板。
 - [ ] 设置页按设备能力动态显示选项。
-- [ ] 局部特写模式可用。
 - [ ] 封面 / 水印至少有一个可用模板。
 - [ ] 支持设备上可启用前后双摄并发拍照。
 - [ ] 支持设备上可启用前后双摄双路录像，至少 720p / 30fps。
@@ -1500,3 +1447,734 @@ cd android
 ## 22. 一句话原则
 
 先把“同源双画面”的裁切、输出、媒体管理做成稳定的创作系统，最后再把“双摄并发”作为设备支持时可用的高级模式接入。当前阶段最重要的不是炫技，而是让用户每次按下快门都能稳定得到一组可直接分享的素材。
+
+---
+
+## 2026-04-25 升级记录
+
+### 本次目标
+- 按 Task 1 建立 Composition Engine 的类型、纯工具函数和测试护栏。
+- 不接入 `CameraShell.tsx`，不改变 UI、拍照、录像和保存行为。
+
+### 修改文件
+- `src/types/composition.ts`
+- `src/utils/composition.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `src/utils/camera.ts`
+- `__tests__/App.test.tsx`
+
+### 关键实现
+- 新增 `CompositionScene`、`CropSpec`、`CompositionOutputSpec` 等构图类型。
+- 新增 `buildCompositionScene()`，封装当前主/副显示方向、主/副保存方向和双输出启用规则。
+- 放宽 `visibleFrameSpec()` 入参类型，使其接收最小化 aspect option，便于纯工具复用。
+- 新增 Jest 测试覆盖 `visibleFrameSpec`、`calculateContainedFrame`、`videoFpsOptionsForQuality`、`videoTargetSizeForAspect`、`ensureVideoExtension`、settings 类型守卫和 `buildCompositionScene()`。
+- 为现有 `App.test.tsx` 补充 VisionCamera、RNFS、CameraRoll、Nitro 的轻量 mock，避免测试环境直接解析原生/ESM 包。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] `:app:assembleDebug`
+- [ ] 真机单画面拍照
+- [ ] 真机双画面拍照
+- [ ] 真机双画面录像
+
+### 已知问题
+- 首次执行 `:app:assembleDebug` 时 `:app:createBundleDebugJsAndAssets` 报 `index.android.bundle.hbc` 不存在；手动使用同一条 Hermes 命令生成缺失的 `.hbc` 后复跑 `:app:assembleDebug` 通过。后续若复现，应单独排查 RN Gradle Hermes bundle 任务在 Windows 下的输出文件时序。
+- 本轮只新增构图引擎和测试护栏，尚未用 `buildCompositionScene()` 替换 `CameraShell.tsx` 中的派生构图逻辑。
+
+### 下一步
+- 执行 Task 2：在 `CameraShell.tsx` 中接入 `buildCompositionScene()`，以 scene 输出替换现有 `mainFrameSpec`、`subFrameSpec`、`saveMainFrameSpec`、`saveSubFrameSpec` 派生逻辑，并保持行为不变。
+
+---
+
+## 2026-04-25 升级记录（二）
+
+### 本次目标
+- 补充验证规则：没有 Android 代码、依赖、Gradle 或打包配置改动时，不强制执行 Android Debug 构建。
+- 执行 Task 2：用 Composition Engine 替换 `CameraShell.tsx` 内部的构图派生逻辑。
+- 执行 Task 3：增加可关闭、可持久化的构图安全框，不改变拍摄输出。
+
+### 修改文件
+- `codex.md`
+- `src/screens/CameraShell.tsx`
+- `src/components/CameraPrimitives.tsx`
+- `src/components/CompositionOverlay.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/types/camera.ts`
+- `src/utils/settings.ts`
+- `src/__tests__/cameraUtils.test.ts`
+
+### 关键实现
+- `CameraShell.tsx` 新增 `compositionScene`，由 `buildCompositionScene()` 统一产出主/副显示构图、主/副保存构图和方向；下游变量名保持不变，拍照/录像保存入口不改。
+- 新增 `SafetyOverlayMode = 'off' | 'subtle' | 'strong'`，默认值为 `subtle`，并纳入设置读写和类型守卫。
+- 新增 `CompositionOverlay`，使用 React Native 轻量 `View`/`Text` 叠层绘制边框、角标和主/副构图标签，`pointerEvents="none"`，不抢占对焦、缩放和 PiP 点击。
+- 录像中 overlay 自动降级为最小边框，不显示文字标签。
+- 设置页在拍照和录像页签中提供“构图安全框：关闭 / 轻量 / 明显”入口。
+- 按用户补充要求更新验证规则：无 Android 代码改动时不必重跑 `:app:assembleDebug`。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按新规则跳过）
+- [ ] 真机单画面拍照
+- [ ] 真机双画面拍照
+- [ ] 真机双画面录像
+
+### 已知问题
+- 本轮未做真机视觉回归；需要在下一次设备验证时确认安全框不会遮挡关键 UI，且 PiP 点击、主预览对焦和缩放手势仍正常。
+- 安全框当前只提示可见构图范围，不做复杂网格线或安全区模板。
+
+### 下一步
+- 执行 Task 4：修正文档和设置页文案，避免“同时采集”等表述误导为已支持前后双摄并发。
+- 执行 Task 5：建立最小设备能力服务，将设置页硬编码能力入口收口到统一模型。
+
+---
+
+## 2026-04-25 升级记录（三）
+
+### 本次目标
+- 执行 Task 4 的用户可见文案修正，避免误导为已支持前后双摄并发。
+
+### 修改文件
+- `src/components/SettingsModal.tsx`
+- `codex.md`
+
+### 关键实现
+- 设置页关于文案从“主副画面同时采集”改为“同一摄像头的主副构图同时输出”。
+- 确认 `README.md` 和 `agents.md` 已明确“双画面是同一摄像头同源预览的多视图裁剪，不是双摄并发”。
+- 确认 App 内和公开协作文档中不再出现“同时采集”误导表述。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] 文案搜索：`src/components/SettingsModal.tsx`、`README.md`、`agents.md` 无“同时采集”
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按新规则跳过）
+
+### 已知问题
+- 未做真机 UI 文案查看；需要下次设备验证时顺带确认设置页关于文案展示正常。
+
+### 下一步
+- 执行 Task 5：建立最小设备能力服务，将设置页硬编码能力入口收口到统一模型。
+
+---
+
+## 2026-04-25 升级记录（四）
+
+### 本次目标
+- 执行 Task 5：建立设备能力服务最小闭环，把设置页硬编码能力判断收口到统一模型。
+
+### 修改文件
+- `src/types/cameraCapabilities.ts`
+- `src/utils/cameraCapabilities.ts`
+- `src/screens/CameraShell.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `CameraCapabilities` 类型，覆盖闪光灯、照片格式、录像帧率、录像画质和录像编码能力。
+- 新增 `buildCameraCapabilities(device)`，从 VisionCamera `device` 派生基础能力对象。
+- 新增 `firstSupportedVideoQuality()`，用于旧设置或当前设置不可用时降级。
+- `CameraShell.tsx` 生成并传入 `capabilities`，并在设置加载后自动降级不支持的闪光灯、照片格式、帧率、画质和编码设置。
+- `SettingsModal.tsx` 改为通过 `capabilities` 禁用不可用选项，不再直接散落判断 `device.hasFlash` 等字段。
+- 新增能力服务单元测试，覆盖闪光灯、FPS、分辨率和默认降级画质。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按新规则跳过）
+- [ ] 前后摄切换后能力对象更新（待真机回归）
+- [ ] 旧设置不可用时自动降级（已做类型逻辑，待真机覆盖）
+
+### 已知问题
+- HEVC/H.264 编码能力当前仍按“未知则允许”处理，后续需要通过原生 MediaCodec 能力或转码失败统计补齐更精确判断。
+- 视频画质能力基于 `device.getSupportedResolutions('video')` 的单输出分辨率能力，仍不等价于多输出组合能力；实际 CameraX session 仍以运行时降级和错误保护为准。
+
+### 下一步
+- 进入后续 Phase 4 / Task：建立 Media Asset Index，把一次拍摄的主图、副图、视频变体按 `captureId` 成组。
+
+---
+
+## 2026-04-25 升级记录（五）
+
+### 本次目标
+- 开始 Phase 4：建立 Media Asset Index 最小闭环。
+- 先完成本地 JSON 索引、保存链路写入和 Gallery 元数据合并，后续再做完整 group-first Gallery UI。
+
+### 修改文件
+- `src/types/mediaAsset.ts`
+- `src/utils/captureId.ts`
+- `src/utils/mediaIndex.ts`
+- `src/types/camera.ts`
+- `src/utils/gallery.ts`
+- `src/screens/CameraShell.tsx`
+- `src/components/GalleryModal.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `__tests__/App.test.tsx`
+- `codex.md`
+
+### 关键实现
+- 新增 `DualMediaAsset`、`DualCaptureGroup`、`OutputPackId` 等媒体索引类型。
+- 新增 `createCaptureId()`，用于一次拍摄生成稳定分组 ID。
+- 新增 `media-index.json` 读写工具，路径为 `DocumentDirectoryPath/DualViewCamera/media-index.json`。
+- 写入索引前会读取旧索引并合并同一 `captureId`，最多保留最近 500 个 capture group；JSON 损坏时备份为 `media-index.broken.{timestamp}.json` 后重建。
+- 拍照保存链路写入索引：单画面生成 `main` asset；双画面主图和副图共享同一个 `captureId`。
+- 录像保存链路写入索引：主视频先写入 `main` asset；副视频后台转码完成后用同一个 `captureId` 合并写入 `sub` asset。
+- `loadDualViewGallery()` 加载系统相册后读取本地索引，为 `GalleryMedia` 补充 `captureId`、`captureRole`、`captureGroupSize` 和 `captureGroupCreatedAt`，并让同组资产靠在一起排序。
+- Gallery 顶部和详情页显示主画面 / 副画面等角色信息，便于验证索引是否命中。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+- [ ] 真机双画面拍照后主/副图共享 `captureId`（待设备验证）
+- [ ] App 重启后索引仍在（待设备验证）
+
+### 已知问题
+- Gallery 目前仍是 flat media viewer，只是按索引补充分组元数据并让同组资产相邻；尚未完成“首屏只显示 capture group、组内左右滑资产”的完整 UI。
+- 索引不会删除系统相册文件；删除媒体后索引清理将在后续 Gallery 分组 UI 或 Media Job Queue 阶段补齐。
+- 资产宽高、时长仍以系统相册查询为准；本地索引用于分组和角色，不替代 MediaStore。
+
+### 下一步
+- 继续 Phase 4：把 Gallery 改为 group-first 展示，一个 capture group 在首屏只占一个入口，进入后查看组内主图 / 副图 / 视频变体。
+- 随后进入 Phase 5：Media Job Queue，把副视频转码、照片素材包生成和失败状态从轻量 toast 升级为可追踪任务。
+
+---
+
+## 2026-04-25 升级记录（六）
+
+### 本次目标
+- 继续 Phase 4：把 Gallery 从纯媒体平铺推进为 capture group 优先展示。
+- 保持现有查看、分享、删除、详情和缩放交互可用。
+
+### 修改文件
+- `src/components/GalleryModal.tsx`
+- `src/styles/cameraStyles.ts`
+- `codex.md`
+
+### 关键实现
+- `GalleryView` 内部新增 `groupGalleryItems()`，按 `captureId` 将系统相册结果聚合为 Gallery group；没有索引的旧媒体仍按单项 group 展示。
+- 顶层横向分页现在按 capture group 计数，而不是按单个媒体计数。
+- 每个 group 内按 `main`、`sub`、`vertical`、`horizontal`、`square`、`cover`、`source` 排序。
+- 当 group 内有多项资产时，画面底部显示主画面 / 副画面 / 竖图 / 横图等切换标签，当前页内可查看该组不同资产。
+- Gallery 详情继续显示 `captureId`、角色和组内资产数量。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+- [ ] 真机双画面拍照后 Gallery 只出现一个 capture group（待设备验证）
+- [ ] group 内切换主图 / 副图（待设备验证）
+
+### 已知问题
+- group 内资产切换目前使用底部标签点击，不是嵌套横向手势；避免与顶层 group 横滑分页冲突。后续若要组内也支持横滑，需要改为双层导航或进入 group detail 页面。
+- 删除当前仍删除单个 asset，没有同步清理本地索引；后续需要在 Media Index 阶段补齐删除后的索引维护。
+
+### 下一步
+- 进入 Phase 5：Media Job Queue，先把副视频转码任务纳入队列状态模型，再逐步把照片素材包生成接入队列。
+
+---
+
+## 2026-04-25 升级记录（七）
+### 本次目标
+- 继续 Phase 5：建立 `MediaJobQueue` 最小闭环。
+- 先把双画面录像的副画面后台生成纳入可追踪任务状态，保留主视频立即入库的现有可靠路径。
+- 补充协作约束：后续不再自动执行 git commit，提交由用户确认后再做。
+
+### 修改文件
+- `src/types/mediaJob.ts`
+- `src/utils/mediaJobQueue.ts`
+- `src/components/MediaJobIndicator.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `MediaJob` 类型，覆盖 `queued`、`running`、`succeeded`、`failed`、`cancelled` 状态，以及进度、输入、输出、错误信息和重试次数。
+- 新增 `media-jobs.json` 持久化工具，路径为 `DocumentDirectoryPath/DualViewCamera/media-jobs.json`；JSON 损坏时会备份为 `media-jobs.broken.{timestamp}.json` 后重建。
+- App 启动时会加载历史任务；若发现上次退出前仍处于 `queued` 或 `running`，会标记为失败，避免界面长期显示悬挂任务。
+- 双画面录像停止后，主视频仍按原路径立即保存并写入 Media Asset Index；副画面视频后台生成时会登记 `video-variant` 任务，并更新为运行、成功或失败。
+- 新增 `MediaJobIndicator` 前台小状态条，展示副画面视频后台生成进度；当前原生转码链路没有真实进度回调，因此先使用关键阶段进度点。
+- 新增单元测试覆盖任务创建、进度裁剪和重启后中断任务恢复为失败。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- `MediaJobQueue` 目前先承担持久化状态追踪，尚未把任务执行器完全抽象为统一串行队列；副画面视频仍由现有后台 async 路径执行。
+- 副画面视频转码没有真实百分比回调，状态条进度为阶段性估算。
+- 失败任务当前只展示短时间失败提示，尚未提供 UI 层重试/取消入口。
+
+### 下一步
+- 将副画面视频后台生成从内联 async 进一步迁移为真正的 `MediaJobQueue` 串行执行任务。
+- 接入照片素材包生成任务，并把失败状态同步回 Gallery 分组内的对应 asset。
+
+### 修复记录
+- 修复 `MediaJobIndicator` 完成态不会自动消失的问题：组件现在会在完成/失败态启动轻量定时刷新，让 `isVisibleMediaJob()` 的过期时间能够生效。
+
+---
+
+## 2026-04-25 升级记录（八）
+### 本次目标
+- 继续 Phase 5：把副画面视频后台生成接入串行执行器，避免多个媒体任务并发抢占转码资源。
+
+### 修改文件
+- `src/utils/mediaJobQueue.ts`
+- `src/screens/CameraShell.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `mediaJobQueue.ts` 新增 `runQueuedMediaJob()`，使用模块级 promise chain 保证媒体任务一次只运行一个。
+- 双画面录像的副画面视频生成现在先登记为 `queued`，再通过 `runQueuedMediaJob()` 进入执行阶段。
+- 保留主视频立即保存和入库逻辑，副视频排队或失败不影响主视频可用性。
+- 新增单元测试覆盖串行执行顺序，确保第二个任务不会在第一个任务结束前启动。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- 当前串行执行器是内存级队列，App 进程退出后不会恢复未执行任务；重启时仍会把未完成任务标记为失败。
+- 还没有 UI 层重试/取消入口。
+
+### 下一步
+- 将照片素材包生成接入 `MediaJobQueue`。
+- 为 Gallery 分组补充失败 asset 状态展示和后续重试入口。
+
+---
+
+## 2026-04-25 升级记录（九）
+### 本次目标
+- 继续 Phase 5：将照片后台处理接入 `MediaJobQueue`。
+- 遵守新协作规则：新功能不自动提交；只有明确 fixbug 时才自动提交。
+
+### 修改文件
+- `src/screens/CameraShell.tsx`
+- `codex.md`
+
+### 关键实现
+- 单画面照片后台处理登记为 `photo-variant` 任务。
+- 双画面照片主/副图生成登记为 `photo-pack` 任务。
+- 照片裁剪、双图生成、相册入库和 Media Asset Index 写入现在通过 `runQueuedMediaJob()` 串行执行，避免与副画面视频转码任务并发争抢媒体处理资源。
+- 保持拍照快门路径不等待后处理，捕获完成后 UI 仍会恢复；失败时写入任务失败状态并保留原有 toast 提示。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- 照片任务进度仍是阶段性估算，不是原生处理的真实百分比。
+- Gallery 目前还没有把失败任务转成组内失败 asset 显示，也没有重试入口。
+
+### 下一步
+- 为 Gallery 分组补充失败 asset 状态展示。
+- 设计任务失败后的重试入口，优先覆盖副画面视频和照片素材包。
+
+---
+
+## 2026-04-25 升级记录（十）
+### 本次目标
+- 修复项目中文字乱码，确保源码按 UTF-8 文本维护。
+- 继续下一阶段：Gallery 分组展示后台任务失败状态。
+
+### 修改文件
+- `src/screens/CameraShell.tsx`
+- `src/components/GalleryModal.tsx`
+- `src/styles/cameraStyles.ts`
+- `codex.md`
+
+### 关键实现
+- 修复 `照片保存失败` 的 mojibake 文案，已提交 bugfix。
+- 使用 UTF-8 读取方式扫描 `src`、`__tests__`、`codex.md`、`agents.md`、`README.md`，未发现同类 mojibake 模式残留。
+- `GalleryView` 新增 `mediaJobs` 输入，将失败任务按 `captureId` 归入同一 Gallery group。
+- 当 group 有成功资产但存在失败任务时，画面内显示失败提示条。
+- 当 group 只有失败任务、没有成功资产时，Gallery 显示失败占位，避免空白页。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+---
+
+## 2026-04-26 升级记录（拍摄位置元数据）
+### 本次目标
+- 为拍照和录像产物增加拍摄位置元数据，照片写入 EXIF，录像写入视频 metadata。
+
+### 修改文件
+- `package.json`
+- `package-lock.json`
+- `android/app/src/main/AndroidManifest.xml`
+- `android/app/src/main/java/com/dualviewcamerav1init/DualViewMediaModule.kt`
+- `src/screens/CameraShell.tsx`
+- `codex.md`
+
+### 关键实现
+- 接入 `react-native-vision-camera-location`。
+- Android 增加 `ACCESS_FINE_LOCATION` 和 `ACCESS_COARSE_LOCATION` 权限。
+- 相机页启动后请求位置权限；权限未授权或暂未取得定位时，不阻塞拍照/录像。
+- 拍照调用 `capturePhotoToFile()` 时传入当前 `location`，写入原始照片 EXIF。
+- 录像调用 `createRecorder()` 时传入当前 `location`，写入原始视频 metadata。
+- 原生裁切照片和封面生成后，会从原始照片 EXIF 复制 GPS 到生成文件，确保主图、副图、封面都尽量保留拍摄位置。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+
+---
+
+## 2026-04-26 升级记录（Phase 9 封面元数据）
+### 本次目标
+- 继续 Phase 9，补齐封面标题和模板信息在 Media Asset Index 与 Gallery 详情页之间的传递。
+
+### 修改文件
+- `src/types/mediaAsset.ts`
+- `src/types/camera.ts`
+- `src/utils/mediaIndex.ts`
+- `src/screens/CameraShell.tsx`
+- `src/components/GalleryModal.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `DualMediaAsset` 增加 `title` 元数据字段，封面生成时写入当前封面标题。
+- `GalleryMedia` 增加 `title` 和 `templateId`，通过 `enrichGalleryMediaWithIndex()` 从索引补齐。
+- Gallery 详情页展示封面标题和模板名称，为后续单张封面编辑做数据基础。
+- 单元测试覆盖索引元数据向 Gallery item 的透传。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+---
+
+## 2026-04-26 Bugfix 记录（封面水印遮罩）
+### 问题
+- 封面图底部使用半透明遮罩承载标题和水印，遮挡了原始画面内容。
+
+### 修复
+- 移除封面图半透明底部遮罩，不再用矩形覆盖画面。
+- 保留模板强调线、标题、日期水印和参数水印。
+- 文字改为使用轻量阴影提升可读性，避免用大面积遮罩压暗画面。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+
+---
+
+## 2026-04-26 升级记录（Phase 9 标题配置）
+### 本次目标
+- 继续 Phase 9，补齐封面模板的简单标题配置能力。
+
+### 修改文件
+- `src/types/coverTemplate.ts`
+- `src/utils/settings.ts`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `CoverTemplateSettings` 增加 `title` 字段，作为封面默认标题。
+- 设置页封面水印区域增加标题输入框，限制 28 个字符。
+- 封面生成优先使用用户配置标题，空标题回退为当前拍摄模式默认标题。
+- settings 类型守卫增加标题长度校验，避免异常持久化值进入 UI。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+---
+
+## 2026-04-26 升级记录（Phase 9 启动）
+### 本次目标
+- 按主线移除已废弃的中间阶段模块说明。
+- 启动 Phase 9：封面与水印模板，先覆盖照片封面生成和 capture group 入库。
+
+### 修改文件
+- `src/types/composition.ts`
+- `src/types/coverTemplate.ts`
+- `src/config/coverTemplates.ts`
+- `src/utils/coverGenerator.ts`
+- `src/utils/mediaIndex.ts`
+- `src/utils/settings.ts`
+- `src/types/camera.ts`
+- `src/native/dualViewMedia.ts`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `android/app/src/main/java/com/dualviewcamerav1init/DualViewMediaModule.kt`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `CompositionLayoutId` 只保留当前可用布局，文档不再规划已废弃的特写副画面能力。
+- 新增封面模板设置：关闭、日期封面、双画面卡片、Vlog 标题。
+- 设置页新增封面水印入口，可切换模板、日期水印、参数水印。
+- 拍照后台任务在主图保存后尝试生成 `cover` asset，并写入同一个 capture group。
+- Android 原生新增 Bitmap 封面合成，输出 16:9 JPG，失败不影响主图保存。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [x] `:app:assembleDebug`
+
+---
+
+## 2026-04-25 升级记录（十五）
+### 本次目标
+- 继续 Phase 6：补齐第一批双画面预览布局模板切换入口。
+
+### 修改文件
+- `src/types/camera.ts`
+- `src/utils/settings.ts`
+- `src/components/CameraPrimitives.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `previewLayoutTemplate` 持久化设置，支持 `pip`、`split-horizontal`、`split-vertical`、`stack`。
+- 设置页“双画面”分组新增布局选择 Chip：画中画、左右分屏、上下分屏、主图+副条。
+- 双画面预览层新增 `TemplateDualPreview`，在非 PiP 模板下用两个原生预览 Surface 展示主/副画面。
+- 模板布局仅影响预览展示；拍照和录像仍沿用主/副独立输出，不做合成图片或合成视频。
+- 模板模式下主预览继续传入 `hybridRef`，保留对焦测光路径。
+- 单元测试补充布局模板 ID 校验，避免非法模板配置写入后影响启动恢复。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- 真机验证四种布局下的预览显示、对焦、拍照和录像主链路。
+- 后续再考虑为模板增加更明确的小图标预览；当前先用文字 Chip 降低改动风险。
+
+---
+
+## 2026-04-25 升级记录（十六）
+### 本次目标
+- 继续 Phase 7：把当前设备不支持的已保存设置自动降级逻辑收口到 Capability Service。
+
+### 修改文件
+- `src/utils/cameraCapabilities.ts`
+- `src/screens/CameraShell.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `resolveSettingsForCapabilities()`，统一处理闪光灯、照片格式、录像帧率、录像画质、录像编码的能力降级。
+- `CameraShell` 不再散落逐项判断不可用设置，改为调用能力服务返回的 `patch` 并应用降级。
+- 设备不支持已保存设置时，会通过 Toast 给出第一条明确提示，例如不支持 HEIF、4K 或 60HZ 时自动切回可用选项。
+- 单元测试覆盖不可用能力组合下的降级结果，确保旧设置在前后摄切换或设备能力变化后不会继续保留危险值。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- 继续 Phase 7：把能力服务扩展到“双画面稳定性策略”，在双画面模式下对高风险规格做更明确的预览态/录制态降级提示。
+
+---
+
+## 2026-04-25 升级记录（十七）
+### 本次目标
+- 继续 Phase 7：补齐双画面模式下的高风险录像规格稳定性降级策略。
+
+### 修改文件
+- `src/utils/cameraCapabilities.ts`
+- `src/screens/CameraShell.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `resolveDualViewVideoSettingsForStability()`，把双画面模式下的 60HZ、4K、8K 录像设置收敛到更稳定的 1080P/30HZ。
+- `CameraShell` 在设置加载完成后监听 `viewMode`、`videoFps`、`videoQuality`，进入双画面或选择高风险规格时自动应用降级。
+- 降级时显示 Toast：`双画面模式为保证预览稳定，已切换到 1080P/30HZ`。
+- 单画面模式不受该策略影响，仍保留设备能力范围内的高规格选项。
+- 单元测试覆盖双画面降级和单画面不降级两条路径。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- Phase 7 已覆盖基础能力、不可用设置降级和双画面稳定性降级；已废弃的中间阶段不再进入主线，下一阶段进入 Phase 9 封面与水印模板。
+
+### 已知问题
+- Gallery 目前只展示失败状态，还没有重试/取消按钮。
+- 失败任务仍依赖 `MediaJob` 记录，尚未写回 Media Asset Index 成为持久失败 asset。
+
+### 下一步
+- 为失败任务增加重试入口。
+- 评估是否需要将失败 asset 写入 Media Asset Index，以便任务历史和 Gallery 分组长期一致。
+
+---
+
+## 2026-04-25 升级记录（十一）
+### 本次目标
+- 继续 Phase 5：为 Gallery 中的失败任务增加重试入口。
+
+### 修改文件
+- `src/components/GalleryModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- Gallery 失败提示条和失败占位页增加“重试”按钮。
+- `GalleryView` 新增 `onRetryMediaJob` 回调，由 `CameraShell` 负责按任务类型执行重试。
+- 新建任务时补充可重试参数：照片任务记录构图、格式、质量、镜像和旋转 fallback；副视频任务记录构图变体、目标尺寸、编码和旋转 fallback。
+- 重试时复用 `runQueuedMediaJob()`，仍保证媒体后处理串行执行。
+- 支持重试 `video-variant`、`photo-pack`、`photo-variant`；缺少历史参数的旧任务会给出明确失败提示。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- 重试入口依赖 `MediaJob.input` 中记录的源文件和构图参数；接入前产生的旧失败任务可能缺少参数，只能提示无法重试。
+- 失败 asset 尚未写入 Media Asset Index，Gallery 的失败分组仍来自 `media-jobs.json`。
+
+### 下一步
+- 评估并实现失败 asset 写入 Media Asset Index，使 Gallery 分组和任务历史长期一致。
+
+---
+
+## 2026-04-25 升级记录（十二）
+### 本次目标
+- 继续 Phase 5：将失败任务写入 Media Asset Index，减少 Gallery 对 `media-jobs.json` 临时状态的依赖。
+
+### 修改文件
+- `src/types/camera.ts`
+- `src/utils/mediaIndex.ts`
+- `src/components/GalleryModal.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `GalleryMedia` 新增 `captureStatus` 和 `errorMessage` 字段，用于展示失败资产。
+- `mediaIndex.ts` 新增 `buildFailedAsset()`，失败资产使用 `failed://{captureId}/{role}` 作为稳定占位 URI。
+- `enrichGalleryMediaWithIndex()` 会把 Media Asset Index 中没有对应真实相册文件的失败资产追加为 Gallery 占位项。
+- 若同一 capture group 内同一角色已有 ready asset，则隐藏对应 failed asset，避免重试成功后仍显示旧失败项。
+- 照片任务、副画面视频任务和重试任务失败时都会写入 failed asset。
+- Gallery 能渲染 failed asset 占位；如果仍有对应失败 job，则保留“重试”按钮。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 已知问题
+- 失败资产目前只表达“该角色处理失败”，没有细分为转码、裁剪、相册入库等子阶段。
+- 成功后旧 failed asset 仍保留在索引文件中，只是在 Gallery 展示层被 ready asset 覆盖隐藏；后续可增加索引清理。
+
+### 下一步
+- 为 Media Asset Index 增加清理策略：当同角色 ready asset 存在时，合并时移除旧 failed asset。
+
+---
+
+## 2026-04-25 升级记录（十三）
+### 本次目标
+- 最后一次收口 Media Asset 失败策略；本轮结束后不再继续深入失败任务/索引体系，后续切回主线功能开发。
+
+### 修改文件
+- `src/utils/mediaIndex.ts`
+- `src/__tests__/cameraUtils.test.ts`
+- `codex.md`
+
+### 关键实现
+- `mediaIndex.ts` 新增索引资产状态清理：同一 capture group 内同一 role 只要存在 `ready` asset，就移除该 role 的旧 `failed` asset。
+- 清理逻辑同时作用于 `upsertCaptureGroup()` 合并路径和 `loadMediaIndex()` 归一化路径。
+- 保留 Gallery 展示层的失败占位逻辑，但成功资产出现后，索引层也会逐步清掉旧失败项，不再只靠 UI 隐藏。
+- 新增单元测试覆盖：
+  - 同角色 ready asset 存在时不再生成 failed Gallery 占位。
+  - failed asset 先写入、ready asset 后写入时，持久化索引最终只保留 ready asset。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- Media Asset 失败策略到此收口。
+- 后续任务回到主线功能开发，不再继续扩展失败任务体系，除非后续真机验证暴露明确 bug。
+
+---
+
+## 2026-04-25 升级记录（十四）
+### 本次目标
+- 回到主线功能开发，推进 Phase 6：PiP 副画面可拖拽与布局状态持久化。
+
+### 修改文件
+- `src/types/camera.ts`
+- `src/utils/settings.ts`
+- `src/components/CameraPrimitives.tsx`
+- `src/screens/CameraShell.tsx`
+- `src/styles/cameraStyles.ts`
+- `codex.md`
+
+### 关键实现
+- 新增 `PipAnchor`、`PipScale`、`PipLayoutConfig`、`PreviewLayoutTemplateId` 类型，为后续模板化布局预留数据结构。
+- PiP 副画面默认从右下角显示，避开顶部工具栏和底部快门区域。
+- PiP 支持拖拽，松手后按位置吸附到四个角：`top-left`、`top-right`、`bottom-left`、`bottom-right`。
+- 拖拽不会触发主副切换；未发生有效拖拽的短按仍保持主副画面切换行为。
+- PiP 布局写入持久化设置，并在启动时通过 `isPipLayoutConfig()` 校验后恢复。
+- 单元测试补充 PiP 布局配置校验，避免非法 anchor、scale 或 margin 写入后影响启动恢复。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）
+
+### 后续方向
+- 继续 Phase 6 的模板化布局：先补预览模板状态与切换入口，再把 `pip`、`split-horizontal`、`split-vertical`、`stack` 约束到预览层，不改变现有保存策略。
+
+---
+
+## 2026-04-25 Bugfix 记录（PiP 拖拽与图库横滑冲突）
+### 问题
+- PiP 副画面向左拖拽时，外层根视图的左滑打开图库手势也可能被触发，导致拖拽 PiP 与进入图库列表冲突。
+
+### 修复
+- PiP 手势开始时通过 `onGestureActiveChange` 通知 `CameraShell` 暂停外层图库横滑识别。
+- PiP 手势释放或中断后恢复外层图库横滑识别。
+- 保持 PiP 短按切换主副、有效拖拽吸附四角的行为不变。
+
+### 验证结果
+- [x] `npm test -- --runInBand`
+- [x] `npx tsc --noEmit`
+- [x] UTF-8 文本扫描无 mojibake 模式残留
+- [ ] `:app:assembleDebug`（本轮无 Android/native/Gradle/依赖/打包配置改动，按规则跳过）

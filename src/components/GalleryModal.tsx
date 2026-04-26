@@ -14,6 +14,7 @@ import {
 import { NativeDualViewVideoView, DualViewMedia } from '../native/dualViewMedia';
 import { styles } from '../styles/cameraStyles';
 import type { GalleryMedia } from '../types/camera';
+import type { MediaJob } from '../types/mediaJob';
 import {
   clamp,
   clampPhotoTranslate,
@@ -27,12 +28,21 @@ import {
 } from '../utils/camera';
 import { mimeTypeForMedia } from '../utils/gallery';
 
+type GalleryMediaGroup = {
+  id: string;
+  createdAt: number;
+  items: GalleryMedia[];
+  jobs: MediaJob[];
+};
+
 export function GalleryView({
   index,
   items,
   onClose,
   onDelete,
   onIndexChange,
+  onRetryMediaJob,
+  mediaJobs = [],
   translateX,
 }: {
   index: number;
@@ -40,14 +50,22 @@ export function GalleryView({
   onClose: () => void;
   onDelete: (item: GalleryMedia) => void;
   onIndexChange: (index: number) => void;
+  onRetryMediaJob?: (job: MediaJob) => void;
+  mediaJobs?: MediaJob[];
   translateX: Animated.AnimatedInterpolation<number>;
 }) {
-  const listRef = useRef<FlatList<GalleryMedia> | null>(null);
+  const listRef = useRef<FlatList<GalleryMediaGroup> | null>(null);
   const [viewerWidth, setViewerWidth] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [failedPreviewIds, setFailedPreviewIds] = useState<Set<string>>(() => new Set());
   const [zoomLocked, setZoomLocked] = useState(false);
-  const current = items[index] ?? null;
+  const [assetIndexByGroup, setAssetIndexByGroup] = useState<Record<string, number>>({});
+  const groups = useMemo(() => groupGalleryItems(items, mediaJobs), [items, mediaJobs]);
+  const currentGroup = groups[index] ?? null;
+  const currentAssetIndex = currentGroup
+    ? Math.min(assetIndexByGroup[currentGroup.id] ?? 0, currentGroup.items.length - 1)
+    : 0;
+  const current = currentGroup?.items[currentAssetIndex] ?? null;
 
   useEffect(() => {
     if (viewerWidth <= 0) return;
@@ -61,10 +79,16 @@ export function GalleryView({
     setFailedPreviewIds(new Set());
     setZoomLocked(false);
     // Force scroll to index 0 (latest) when items change or component mounts
-    if (items.length > 0 && viewerWidth > 0) {
+    if (groups.length > 0 && viewerWidth > 0) {
       listRef.current?.scrollToIndex({ index: 0, animated: false });
     }
-  }, [items.length, viewerWidth]);
+  }, [groups.length, viewerWidth]);
+
+  useEffect(() => {
+    if (index >= groups.length && groups.length > 0) {
+      onIndexChange(groups.length - 1);
+    }
+  }, [groups.length, index, onIndexChange]);
 
   const shareCurrent = useCallback(async () => {
     if (current == null) return;
@@ -96,24 +120,40 @@ export function GalleryView({
       onLayout={event => setViewerWidth(event.nativeEvent.layout.width)}
     >
       <View style={styles.galleryTopBar}>
-        <Text style={styles.galleryCount}>{items.length > 0 ? `${index + 1}/${items.length}` : '0/0'}</Text>
+        <Text style={styles.galleryCount}>
+          {groups.length > 0
+            ? `${index + 1}/${groups.length}${current?.captureRole ? ` · ${roleLabel(current.captureRole)}` : ''}`
+            : '0/0'}
+        </Text>
       </View>
 
-      {viewerWidth > 0 && items.length > 0 ? (
+      {viewerWidth > 0 && groups.length > 0 ? (
         <FlatList
           ref={listRef}
-          data={items}
+          data={groups}
           horizontal
           initialNumToRender={3}
-          keyExtractor={item => item.id}
+          keyExtractor={group => group.id}
           maxToRenderPerBatch={3}
           pagingEnabled
           removeClippedSubviews
           scrollEnabled={!zoomLocked}
-          renderItem={({ item, index: itemIndex }) => (
+          renderItem={({ item: group, index: groupIndex }) => {
+            const groupAssetIndex = Math.min(
+              assetIndexByGroup[group.id] ?? 0,
+              group.items.length - 1,
+            );
+            const item = group.items[groupAssetIndex] ?? null;
+            const failedJobs = group.jobs.filter(job => job.status === 'failed');
+
+            return (
             <View style={[styles.galleryPage, { width: viewerWidth }]}>
-              {Math.abs(itemIndex - index) > 2 ? (
+              {Math.abs(groupIndex - index) > 2 ? (
                 <View style={styles.galleryLazyPage} />
+              ) : item == null ? (
+                <FailedMediaJobFallback jobs={failedJobs} onRetry={onRetryMediaJob} />
+              ) : item.captureStatus === 'failed' ? (
+                <FailedAssetFallback item={item} job={failedJobs[0]} onRetry={onRetryMediaJob} />
               ) : item.type === 'photo' && !failedPreviewIds.has(item.id) ? (
                 <ZoomablePhoto
                   item={item}
@@ -124,15 +164,49 @@ export function GalleryView({
                       return next;
                     })
                   }
-                  onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined}
+                  onZoomActiveChange={groupIndex === index ? setZoomLocked : undefined}
                 />
               ) : item.type === 'video' ? (
-                <InlineVideoPlayer item={item} onZoomActiveChange={itemIndex === index ? setZoomLocked : undefined} />
+                <InlineVideoPlayer item={item} onZoomActiveChange={groupIndex === index ? setZoomLocked : undefined} />
               ) : (
                 <MediaPreviewFallback item={item} />
               )}
+              {failedJobs.length > 0 && item != null ? (
+                <FailedMediaJobBanner jobs={failedJobs} onRetry={onRetryMediaJob} />
+              ) : null}
+              {group.items.length > 1 ? (
+                <View style={styles.galleryAssetStrip}>
+                  {group.items.map((asset, assetIndex) => (
+                    <Pressable
+                      key={asset.id}
+                      style={[
+                        styles.galleryAssetChip,
+                        assetIndex === groupAssetIndex && styles.galleryAssetChipActive,
+                      ]}
+                      onPress={() => {
+                        setAssetIndexByGroup(previous => ({
+                          ...previous,
+                          [group.id]: assetIndex,
+                        }));
+                        setDetailsOpen(false);
+                        setZoomLocked(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.galleryAssetChipText,
+                          assetIndex === groupAssetIndex && styles.galleryAssetChipTextActive,
+                        ]}
+                      >
+                        {roleLabel(asset.captureRole)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
             </View>
-          )}
+          );
+          }}
           showsHorizontalScrollIndicator={false}
           windowSize={5}
           getItemLayout={(_, itemIndex) => ({
@@ -142,7 +216,7 @@ export function GalleryView({
           })}
           onMomentumScrollEnd={event => {
             const nextIndex = Math.round(event.nativeEvent.contentOffset.x / viewerWidth);
-            onIndexChange(clamp(nextIndex, 0, items.length - 1));
+            onIndexChange(clamp(nextIndex, 0, groups.length - 1));
             setZoomLocked(false);
           }}
           onScrollToIndexFailed={info => {
@@ -415,7 +489,17 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
   return (
     <View style={styles.mediaDetails}>
       <Text style={styles.mediaDetailsTitle}>{item.type === 'photo' ? '照片详情' : '视频详情'}</Text>
+      {item.title ? <Text style={styles.mediaDetailsText}>标题：{item.title}</Text> : null}
       <Text style={styles.mediaDetailsText}>文件：{item.filename ?? '未知'}</Text>
+      {item.captureId ? (
+        <>
+          <Text style={styles.mediaDetailsText}>拍摄组：{item.captureId}</Text>
+          <Text style={styles.mediaDetailsText}>
+            角色：{roleLabel(item.captureRole)}（共 {item.captureGroupSize ?? 1} 项）
+          </Text>
+        </>
+      ) : null}
+      {item.templateId ? <Text style={styles.mediaDetailsText}>模板：{coverTemplateLabel(item.templateId)}</Text> : null}
       <Text style={styles.mediaDetailsText}>时间：{formatTimestamp(item.timestamp)}</Text>
       <Text style={styles.mediaDetailsText}>尺寸：{item.width || '-'} × {item.height || '-'}</Text>
       {item.type === 'video' ? (
@@ -427,4 +511,186 @@ function MediaDetails({ item }: { item: GalleryMedia }) {
       </Text>
     </View>
   );
+}
+
+function coverTemplateLabel(templateId: string): string {
+  switch (templateId) {
+    case 'clean-date':
+      return '日期封面';
+    case 'dual-card':
+      return '双画面卡片';
+    case 'vlog-title':
+      return 'Vlog 标题';
+    default:
+      return templateId;
+  }
+}
+
+function FailedMediaJobBanner({
+  jobs,
+  onRetry,
+}: {
+  jobs: MediaJob[];
+  onRetry?: (job: MediaJob) => void;
+}) {
+  const [job] = jobs;
+  if (job == null) return null;
+  return (
+    <View style={styles.galleryJobBanner}>
+      <Text style={styles.galleryJobBannerTitle}>{mediaJobLabel(job)}失败</Text>
+      <Text style={styles.galleryJobBannerText} numberOfLines={2}>
+        {job.errorMessage ?? '后台处理失败'}
+      </Text>
+      {onRetry ? (
+        <Pressable style={styles.galleryJobRetryButton} onPress={() => onRetry(job)}>
+          <Text style={styles.galleryJobRetryText}>重试</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function FailedMediaJobFallback({
+  jobs,
+  onRetry,
+}: {
+  jobs: MediaJob[];
+  onRetry?: (job: MediaJob) => void;
+}) {
+  const [job] = jobs;
+  return (
+    <View style={styles.mediaPreviewFallback}>
+      <Text style={styles.videoPreviewIcon}>!</Text>
+      <Text style={styles.videoPreviewTitle}>{job ? `${mediaJobLabel(job)}失败` : '后台处理失败'}</Text>
+      <Text style={styles.videoPreviewHint}>
+        {job?.errorMessage ?? '该组没有可预览的成功资产'}
+      </Text>
+      {job && onRetry ? (
+        <Pressable style={styles.galleryJobRetryButton} onPress={() => onRetry(job)}>
+          <Text style={styles.galleryJobRetryText}>重试</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function FailedAssetFallback({
+  item,
+  job,
+  onRetry,
+}: {
+  item: GalleryMedia;
+  job?: MediaJob;
+  onRetry?: (job: MediaJob) => void;
+}) {
+  return (
+    <View style={styles.mediaPreviewFallback}>
+      <Text style={styles.videoPreviewIcon}>!</Text>
+      <Text style={styles.videoPreviewTitle}>{roleLabel(item.captureRole)}失败</Text>
+      <Text style={styles.videoPreviewHint}>
+        {item.errorMessage ?? '后台处理失败'}
+      </Text>
+      {job && onRetry ? (
+        <Pressable style={styles.galleryJobRetryButton} onPress={() => onRetry(job)}>
+          <Text style={styles.galleryJobRetryText}>重试</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function groupGalleryItems(items: GalleryMedia[], jobs: MediaJob[] = []): GalleryMediaGroup[] {
+  const groups = new Map<string, GalleryMediaGroup>();
+
+  items.forEach(item => {
+    const id = item.captureId ?? item.id;
+    const existing = groups.get(id);
+    if (existing) {
+      existing.items.push(item);
+      existing.createdAt = Math.max(existing.createdAt, item.captureGroupCreatedAt ?? item.timestamp);
+      return;
+    }
+
+    groups.set(id, {
+      id,
+      createdAt: item.captureGroupCreatedAt ?? item.timestamp,
+      items: [item],
+      jobs: [],
+    });
+  });
+
+  jobs
+    .filter(job => job.status === 'failed')
+    .forEach(job => {
+      const existing = groups.get(job.captureId);
+      if (existing) {
+        existing.jobs.push(job);
+        existing.createdAt = Math.max(existing.createdAt, job.createdAt);
+        return;
+      }
+      groups.set(job.captureId, {
+        id: job.captureId,
+        createdAt: job.createdAt,
+        items: [],
+        jobs: [job],
+      });
+    });
+
+  return Array.from(groups.values())
+    .map(group => ({
+      ...group,
+      items: group.items.sort((a, b) => roleOrder(a.captureRole) - roleOrder(b.captureRole)),
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function mediaJobLabel(job: MediaJob): string {
+  switch (job.type) {
+    case 'video-variant':
+      return '副画面视频';
+    case 'photo-pack':
+      return '照片组';
+    case 'photo-variant':
+      return '照片';
+    case 'cover-generate':
+      return '封面';
+    case 'gallery-save':
+      return '相册保存';
+    default:
+      return '后台任务';
+  }
+}
+
+function roleOrder(role?: GalleryMedia['captureRole']): number {
+  const order: Array<NonNullable<GalleryMedia['captureRole']>> = [
+    'main',
+    'sub',
+    'vertical',
+    'horizontal',
+    'square',
+    'cover',
+    'source',
+  ];
+  return role == null ? order.length : order.indexOf(role);
+}
+
+function roleLabel(role?: GalleryMedia['captureRole']): string {
+  switch (role) {
+    case 'main':
+      return '主画面';
+    case 'sub':
+      return '副画面';
+    case 'vertical':
+      return '竖图';
+    case 'horizontal':
+      return '横图';
+    case 'square':
+      return '方图';
+    case 'cover':
+      return '封面';
+    case 'source':
+      return '源文件';
+    default:
+      return '媒体';
+  }
 }
