@@ -235,7 +235,7 @@ function CameraShell({
   const videoOutput = useVideoOutput({
     targetResolution: appliedVideoQualityConfig.resolution,
     enableAudio: microphoneReady,
-    enablePersistentRecorder: false,
+    enablePersistentRecorder: true,
   });
   const captureLocation = useLocation(CAPTURE_LOCATION_OPTIONS);
 
@@ -315,17 +315,34 @@ function CameraShell({
         );
   }, []);
 
-  const concurrentCameraPair = useMemo(
-      () => concurrentCameraCapability?.pairs[0] ?? null,
-      [concurrentCameraCapability],
-  );
+  const concurrentCameraPair = useMemo(() => {
+    const pairs = concurrentCameraCapability?.pairs ?? [];
+
+    return (
+      pairs.find(pair => {
+        const facings = [pair.primaryFacing, pair.secondaryFacing];
+        return facings.includes('back') && facings.includes('front');
+      }) ?? null
+    );
+  }, [concurrentCameraCapability]);
+
+  const concurrentUseCases = concurrentCameraPair?.supportedUseCases ?? [];
+
   const isConcurrentSystemAvailable =
-      concurrentCameraCapability?.supported === true && concurrentCameraPair != null;
+    concurrentCameraCapability?.supported === true && concurrentCameraPair != null;
+
+  const isConcurrentUseCaseSupported =
+    captureMode === 'photo'
+      ? concurrentUseCases.includes('photo')
+      : concurrentUseCases.includes('video');
+
   const isConcurrentSourceAvailable =
-      isConcurrentSystemAvailable &&
-      CONCURRENT_CAMERA_PRODUCT_RENDERER_READY &&
-      backDevice != null &&
-      frontDevice != null;
+    isConcurrentSystemAvailable &&
+    isConcurrentUseCaseSupported &&
+    CONCURRENT_CAMERA_PRODUCT_RENDERER_READY &&
+    backDevice != null &&
+    frontDevice != null;
+
   const isConcurrentSourceMode =
       captureSourceMode === 'concurrent-cameras' && isConcurrentSourceAvailable;
 
@@ -336,13 +353,17 @@ function CameraShell({
           return;
         }
         if (mode === 'concurrent-cameras' && !isConcurrentSourceAvailable) {
-          setToast(
-              isConcurrentSystemAvailable
-                  ? '系统返回双摄组合，但 VisionCamera 前后摄像头设备未就绪，已保持同源双画面'
-                  : concurrentCameraUnavailableMessage(concurrentCameraCapability),
-          );
-          return;
-        }
+        setToast(
+          isConcurrentSystemAvailable && !isConcurrentUseCaseSupported
+            ? captureMode === 'photo'
+              ? '当前设备的前后摄并发组合不支持拍照，已保持同源双画面'
+              : '当前设备的前后摄并发组合不支持录像，已保持同源双画面'
+            : isConcurrentSystemAvailable
+              ? '系统返回前后摄组合，但 VisionCamera 前后摄像头设备未就绪，已保持同源双画面'
+              : concurrentCameraUnavailableMessage(concurrentCameraCapability),
+        );
+        return;
+      }
         if (mode === 'concurrent-cameras' && captureSourceMode !== 'concurrent-cameras') {
           sameSourceSnapshotRef.current = {
             captureMode,
@@ -373,8 +394,9 @@ function CameraShell({
         captureMode,
         concurrentCameraCapability,
         isConcurrentSourceAvailable,
-        isConcurrentSystemAvailable,
-        isRecording,
+    isConcurrentSystemAvailable,
+    isConcurrentUseCaseSupported,
+    isRecording,
         isSwapped,
         onCaptureModeChange,
         previewLayoutTemplate,
@@ -387,6 +409,15 @@ function CameraShell({
     if (captureSourceMode !== 'concurrent-cameras' || concurrentCameraCapability == null) return;
     if (isConcurrentSourceAvailable) return;
     setCaptureSourceMode('same-camera-crop');
+    if (isConcurrentSystemAvailable && !isConcurrentUseCaseSupported) {
+      setToast(
+        captureMode === 'photo'
+          ? '当前设备的双摄并发不支持拍照，已切回同源双画面'
+          : '当前设备的双摄并发不支持录像，已切回同源双画面',
+      );
+    } else {
+      setToast('当前设备暂不可用真双摄，已切回同源双画面');
+    }
     const snapshot = sameSourceSnapshotRef.current;
     sameSourceSnapshotRef.current = null;
     if (snapshot != null) {
@@ -414,8 +445,8 @@ function CameraShell({
     if (isVideoSessionRequired) {
       setIsVideoSessionTarget(true);
     } else {
-      // Priority: Keep Main Preview stable. Delay the Sub-preview (PIP) 
-      // recovery even longer (1000ms) to ensure the hardware finishes 
+      // Priority: Keep Main Preview stable. Delay the Sub-preview (PIP)
+      // recovery even longer (1000ms) to ensure the hardware finishes
       // its primary session reconfiguration first.
       const timer = setTimeout(() => setIsVideoSessionTarget(false), 1000);
       return () => clearTimeout(timer);
@@ -461,6 +492,14 @@ function CameraShell({
     setLastMedia(mediaToLastMedia(items[0] ?? null));
     setGalleryIndex(current => (items.length === 0 ? 0 : Math.min(current, items.length - 1)));
     return items;
+  }, []);
+
+  const showCapturedPhotoImmediately = useCallback((filePath: string, label = '处理中') => {
+    setLastMedia({
+      uri: toFileUri(filePath),
+      type: 'photo',
+      label,
+    });
   }, []);
 
   const openGallery = useCallback(() => {
@@ -552,12 +591,12 @@ function CameraShell({
     lastViewMode.current = viewMode;
     lastCaptureMode.current = captureMode;
 
-    // Only perform a "Hard Reset" (bumping sessionRevision) when switching 
+    // Only perform a "Hard Reset" (bumping sessionRevision) when switching
     // between Single and Dual view modes, as the UI layout changes significantly.
-    // For mode switching within the same viewMode, let vision-camera 
+    // For mode switching within the same viewMode, let vision-camera
     // handle the session update smoothly without unmounting the view.
     const needsHardReset = isViewModeChange;
-    
+
     if (needsHardReset || viewMode === 'dual') {
       setIsSwitching(true);
     }
@@ -598,8 +637,12 @@ function CameraShell({
             setConcurrentMainCamera(settings.concurrentMainCamera);
           }
           if (isConcurrentOutputMode(settings.concurrentOutputMode)) {
-            setConcurrentOutputMode(settings.concurrentOutputMode);
-          }
+          setConcurrentOutputMode(
+            settings.concurrentOutputMode === 'composed'
+              ? 'separate'
+              : settings.concurrentOutputMode,
+          );
+        }
           if (isConcurrentCompositeLayout(settings.concurrentCompositeLayout)) {
             setConcurrentCompositeLayout(settings.concurrentCompositeLayout);
           }
@@ -792,31 +835,41 @@ function CameraShell({
       [appliedVideoQualityConfig],
   );
 
-  const photoOutputs = useMemo(() => [mainPreviewOutput, photoOutput], [mainPreviewOutput, photoOutput]);
-  const videoOutputs = useMemo(() => [mainPreviewOutput, videoOutput], [mainPreviewOutput, videoOutput]);
 
   const outputs = useMemo(() => {
     if (viewMode === 'dual') {
-      // 1. If actively recording or in the buffer period after stop, 
-      // use the most stable single-preview + video pipe.
-      if (isVideoSessionTarget) {
+      // 1. If actively recording or warming up recording, use the
+      // lightest stable recording pipe: one preview + video only.
+      if (isVideoSessionTarget || captureMode === 'video') {
         return [mainPreviewOutput, videoOutput];
       }
-      
-      // 2. Dual-View Standby (Both Photo and Video modes).
-      // Strategy: Use [Preview+Preview+Photo] which is confirmed stable.
+
+      // 2. Dual photo standby keeps the PIP preview and photo output,
+      // but does not keep the video output attached.
       return [mainPreviewOutput, pipPreviewOutput, photoOutput];
     }
 
-    // Single mode: All-in-one pipeline is standard and stable.
-    return [mainPreviewOutput, photoOutput, videoOutput];
-  }, [viewMode, isVideoSessionTarget, mainPreviewOutput, pipPreviewOutput, photoOutput, videoOutput]);
+    // Single mode: attach only the output required by the active mode.
+    // This keeps full photo quality, but avoids the photo pipeline sharing
+    // bandwidth with an unused video output while taking stills.
+    return captureMode === 'video'
+      ? [mainPreviewOutput, videoOutput]
+      : [mainPreviewOutput, photoOutput];
+  }, [
+    captureMode,
+    viewMode,
+    isVideoSessionTarget,
+    mainPreviewOutput,
+    pipPreviewOutput,
+    photoOutput,
+    videoOutput,
+  ]);
 
   const cameraConstraints = useMemo(() => {
-    // For Dual-View Standby, use standard 30fps without resolution bias 
+    // For Dual-View Standby, use standard 30fps without resolution bias
     // to ensure the hardware can reliably handle multiple streams.
     if (viewMode === 'dual' && !isVideoSessionTarget) {
-       return [{ fps: 30 }]; 
+       return [{ fps: 30 }];
     }
 
     if (viewMode === 'single') {
@@ -1455,6 +1508,12 @@ function CameraShell({
           {},
       );
 
+      // Show the full-quality source file immediately, then let cropping,
+      // album saving, cover generation and gallery indexing continue in the
+      // existing background job. This keeps final quality unchanged while
+      // making the shutter feel like the system camera.
+      showCapturedPhotoImmediately(file.filePath);
+
       saveCapturedPhotoInBackground(file.filePath, {
         mainSpec: saveMainFrameSpec,
         subSpec: saveSubFrameSpec,
@@ -1492,6 +1551,7 @@ function CameraShell({
     saveMainFrameSpec,
     saveSubFrameSpec,
     shouldMirrorSavedPhoto,
+    showCapturedPhotoImmediately,
     shouldRotateMainLandscapeFallback,
     shouldRotateSubLandscapeFallback,
     shutterSoundEnabled,

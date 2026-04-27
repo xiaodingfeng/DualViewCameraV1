@@ -1,4 +1,5 @@
 export type ConcurrentCameraFacing = 'front' | 'back' | 'external' | 'unknown';
+
 export type ConcurrentCameraUseCase = 'preview' | 'photo' | 'video';
 
 export type ConcurrentCameraPair = {
@@ -22,6 +23,7 @@ export type ConcurrentCameraCapabilityReason =
   | 'api-too-low'
   | 'feature-missing'
   | 'no-camera-pairs'
+  | 'no-front-back-pairs'
   | 'camerax-unavailable'
   | 'unknown-error';
 

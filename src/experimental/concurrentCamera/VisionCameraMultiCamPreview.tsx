@@ -1,5 +1,6 @@
 import React, {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -23,7 +24,11 @@ import type {
 } from 'react-native-vision-camera';
 
 import { COLORS } from '../../config/camera';
-import type { CaptureMode, ConcurrentMainCamera, ConcurrentPipLayoutConfig } from '../../types/camera';
+import type {
+  CaptureMode,
+  ConcurrentMainCamera,
+  ConcurrentPipLayoutConfig,
+} from '../../types/camera';
 import { clamp } from '../../utils/camera';
 
 export type VisionCameraMultiCamHandle = {
@@ -66,72 +71,109 @@ type VisionCameraMultiCamPreviewProps = {
   pipLayout: ConcurrentPipLayoutConfig;
 };
 
+type VisionCameraFactoryWithMultiCam = typeof VisionCamera & {
+  supportsMultiCamSessions?: boolean;
+  createCameraSession?: (enableMultiCam: boolean) => Promise<CameraSession>;
+};
+
 const PIP_WIDTH = 142;
 const PIP_HEIGHT = 190;
 const PIP_MIN_MARGIN = 12;
 const PIP_BOTTOM_SAFE = 158;
 
+async function createMultiCamSession(): Promise<CameraSession> {
+  const factory = VisionCamera as VisionCameraFactoryWithMultiCam;
+
+  if (factory.supportsMultiCamSessions !== true) {
+    throw new Error('当前 VisionCamera Runtime 不支持 Multi-Camera Session');
+  }
+
+  if (typeof factory.createCameraSession !== 'function') {
+    throw new Error('当前 VisionCamera 版本没有暴露 createCameraSession(true)');
+  }
+
+  return factory.createCameraSession(true);
+}
+
 export const VisionCameraMultiCamPreview = forwardRef<
   VisionCameraMultiCamHandle,
   VisionCameraMultiCamPreviewProps
->(function VisionCameraMultiCamPreview({
-  active,
-  backDevice,
-  captureMode,
-  enableAudio,
-  frontDevice,
-  location,
-  mainCamera,
-  onError,
-  onPhotoCaptured,
-  onPipLayoutChange,
-  onReadyChange,
-  onVideoCaptured,
-  pipLayout,
-}, ref) {
+>(function VisionCameraMultiCamPreview(
+  {
+    active,
+    backDevice,
+    captureMode,
+    enableAudio,
+    frontDevice,
+    location,
+    mainCamera,
+    onError,
+    onPhotoCaptured,
+    onPipLayoutChange,
+    onReadyChange,
+    onVideoCaptured,
+    pipLayout,
+  },
+  ref,
+) {
   const backPreviewOutput = usePreviewOutput();
   const frontPreviewOutput = usePreviewOutput();
+
   const backPhotoOutput = usePhotoOutput({
     targetResolution: CommonResolutions.UHD_4_3,
     containerFormat: 'jpeg',
     quality: 0.94,
     qualityPrioritization: 'balanced',
   });
+
   const frontPhotoOutput = usePhotoOutput({
     targetResolution: CommonResolutions.UHD_4_3,
     containerFormat: 'jpeg',
     quality: 0.94,
     qualityPrioritization: 'balanced',
   });
+
   const backVideoOutput = useVideoOutput({
     targetResolution: CommonResolutions.HD_16_9,
     enableAudio: enableAudio && mainCamera === 'back',
     enablePersistentRecorder: false,
   });
+
   const frontVideoOutput = useVideoOutput({
     targetResolution: CommonResolutions.HD_16_9,
     enableAudio: enableAudio && mainCamera === 'front',
     enablePersistentRecorder: false,
   });
+
   const sessionRef = useRef<CameraSession | null>(null);
   const isReadyRef = useRef(false);
   const backRecorderRef = useRef<Recorder | null>(null);
   const frontRecorderRef = useRef<Recorder | null>(null);
   const recordingStateRef = useRef<RecordingState | null>(null);
   const startOffsetRef = useRef({ left: 0, top: 0 });
+
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
 
-  const maxPipLeft = Math.max(PIP_MIN_MARGIN, previewSize.width - PIP_WIDTH - PIP_MIN_MARGIN);
-  const maxPipTop = Math.max(PIP_MIN_MARGIN, previewSize.height - PIP_HEIGHT - PIP_BOTTOM_SAFE);
+  const maxPipLeft = Math.max(
+    PIP_MIN_MARGIN,
+    previewSize.width - PIP_WIDTH - PIP_MIN_MARGIN,
+  );
+  const maxPipTop = Math.max(
+    PIP_MIN_MARGIN,
+    previewSize.height - PIP_HEIGHT - PIP_BOTTOM_SAFE,
+  );
+
   const pipPosition = useMemo(
     () => ({
       left: clamp(
-        pipLayout.leftRatio * Math.max(1, maxPipLeft - PIP_MIN_MARGIN) + PIP_MIN_MARGIN,
+        pipLayout.leftRatio * Math.max(1, maxPipLeft - PIP_MIN_MARGIN) +
+          PIP_MIN_MARGIN,
         PIP_MIN_MARGIN,
         maxPipLeft,
       ),
       top: clamp(
-        pipLayout.topRatio * Math.max(1, maxPipTop - PIP_MIN_MARGIN) + PIP_MIN_MARGIN,
+        pipLayout.topRatio * Math.max(1, maxPipTop - PIP_MIN_MARGIN) +
+          PIP_MIN_MARGIN,
         PIP_MIN_MARGIN,
         maxPipTop,
       ),
@@ -142,41 +184,80 @@ export const VisionCameraMultiCamPreview = forwardRef<
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
         onStartShouldSetPanResponder: () => true,
         onPanResponderGrant: () => {
           startOffsetRef.current = pipPosition;
         },
         onPanResponderMove: (_, gesture) => {
-          const left = clamp(startOffsetRef.current.left + gesture.dx, PIP_MIN_MARGIN, maxPipLeft);
-          const top = clamp(startOffsetRef.current.top + gesture.dy, PIP_MIN_MARGIN, maxPipTop);
+          const left = clamp(
+            startOffsetRef.current.left + gesture.dx,
+            PIP_MIN_MARGIN,
+            maxPipLeft,
+          );
+          const top = clamp(
+            startOffsetRef.current.top + gesture.dy,
+            PIP_MIN_MARGIN,
+            maxPipTop,
+          );
+
           onPipLayoutChange?.({
-            leftRatio: (left - PIP_MIN_MARGIN) / Math.max(1, maxPipLeft - PIP_MIN_MARGIN),
-            topRatio: (top - PIP_MIN_MARGIN) / Math.max(1, maxPipTop - PIP_MIN_MARGIN),
+            leftRatio:
+              (left - PIP_MIN_MARGIN) /
+              Math.max(1, maxPipLeft - PIP_MIN_MARGIN),
+            topRatio:
+              (top - PIP_MIN_MARGIN) /
+              Math.max(1, maxPipTop - PIP_MIN_MARGIN),
           });
         },
       }),
     [maxPipLeft, maxPipTop, onPipLayoutChange, pipPosition],
   );
 
-  const finishRecordingIfReady = useMemo(
-    () => () => {
-      const state = recordingStateRef.current;
-      if (state == null || state.errored || !state.backDone || !state.frontDone) return;
-      recordingStateRef.current = null;
-      backRecorderRef.current = null;
-      frontRecorderRef.current = null;
-      if (state.backPath == null || state.frontPath == null) {
-        onError('双摄并发录像文件生成失败');
-        return;
-      }
-      onVideoCaptured({
-        backPath: state.backPath,
-        frontPath: state.frontPath,
-      });
-    },
-    [onError, onVideoCaptured],
-  );
+  const resetRecordingRefs = useCallback(() => {
+    backRecorderRef.current = null;
+    frontRecorderRef.current = null;
+    recordingStateRef.current = null;
+  }, []);
+
+  const cancelActiveRecorders = useCallback(async () => {
+    const recorders = [backRecorderRef.current, frontRecorderRef.current].filter(
+      (recorder): recorder is Recorder => recorder != null,
+    );
+
+    await Promise.allSettled(
+      recorders.map(async recorder => {
+        try {
+          await recorder.cancelRecording();
+        } catch {
+          // Cleanup should never throw into React unmount/session restart.
+        }
+      }),
+    );
+
+    resetRecordingRefs();
+  }, [resetRecordingRefs]);
+
+  const finishRecordingIfReady = useCallback(() => {
+    const state = recordingStateRef.current;
+
+    if (state == null || state.errored || !state.backDone || !state.frontDone) {
+      return;
+    }
+
+    resetRecordingRefs();
+
+    if (state.backPath == null || state.frontPath == null) {
+      onError('双摄并发录像文件生成失败');
+      return;
+    }
+
+    onVideoCaptured({
+      backPath: state.backPath,
+      frontPath: state.frontPath,
+    });
+  }, [onError, onVideoCaptured, resetRecordingRefs]);
 
   useImperativeHandle(
     ref,
@@ -185,81 +266,126 @@ export const VisionCameraMultiCamPreview = forwardRef<
         if (!isReadyRef.current || captureMode !== 'photo') {
           throw new Error('双摄并发拍照会话尚未就绪');
         }
+
         const photoOptions = {
           flashMode: 'off' as const,
           enableShutterSound: false,
           ...(location ? { location } : {}),
         };
+
         const [backPhoto, frontPhoto] = await Promise.all([
           backPhotoOutput.capturePhotoToFile(photoOptions, {}),
           frontPhotoOutput.capturePhotoToFile(photoOptions, {}),
         ]);
+
         onPhotoCaptured({
           backPath: backPhoto.filePath,
           frontPath: frontPhoto.filePath,
         });
       },
+
       startRecording: async () => {
         if (!isReadyRef.current || captureMode !== 'video') {
           throw new Error('双摄并发录像会话尚未就绪');
         }
-        if (recordingStateRef.current != null) {
+
+        if (
+          recordingStateRef.current != null ||
+          backRecorderRef.current != null ||
+          frontRecorderRef.current != null
+        ) {
           throw new Error('双摄并发录像已经在进行中');
         }
+
         const recorderSettings = location ? { location } : {};
-        const [backRecorder, frontRecorder] = await Promise.all([
-          backVideoOutput.createRecorder(mainCamera === 'back' ? recorderSettings : {}),
-          frontVideoOutput.createRecorder(mainCamera === 'front' ? recorderSettings : {}),
-        ]);
-        backRecorderRef.current = backRecorder;
-        frontRecorderRef.current = frontRecorder;
-        recordingStateRef.current = {
-          backDone: false,
-          frontDone: false,
-          errored: false,
-        };
-        const handleError = (error: Error) => {
-          const state = recordingStateRef.current;
-          if (state != null) state.errored = true;
-          recordingStateRef.current = null;
-          backRecorderRef.current = null;
-          frontRecorderRef.current = null;
-          onError(error.message);
-        };
-        await Promise.all([
-          backRecorder.startRecording(
-            filePath => {
-              const state = recordingStateRef.current;
-              if (state == null) return;
-              state.backPath = filePath;
-              state.backDone = true;
-              finishRecordingIfReady();
-            },
-            handleError,
-          ),
-          frontRecorder.startRecording(
-            filePath => {
-              const state = recordingStateRef.current;
-              if (state == null) return;
-              state.frontPath = filePath;
-              state.frontDone = true;
-              finishRecordingIfReady();
-            },
-            handleError,
-          ),
-        ]);
+
+        try {
+          const [backRecorder, frontRecorder] = await Promise.all([
+            backVideoOutput.createRecorder(
+              mainCamera === 'back' ? recorderSettings : {},
+            ),
+            frontVideoOutput.createRecorder(
+              mainCamera === 'front' ? recorderSettings : {},
+            ),
+          ]);
+
+          backRecorderRef.current = backRecorder;
+          frontRecorderRef.current = frontRecorder;
+          recordingStateRef.current = {
+            backDone: false,
+            frontDone: false,
+            errored: false,
+          };
+
+          const handleError = (error: Error) => {
+            const state = recordingStateRef.current;
+            if (state != null) {
+              state.errored = true;
+            }
+
+            void cancelActiveRecorders();
+            onError(error.message || '双摄并发录像失败');
+          };
+
+          await Promise.all([
+            Promise.resolve(
+              backRecorder.startRecording(
+                filePath => {
+                  const state = recordingStateRef.current;
+                  if (state == null || state.errored) return;
+
+                  state.backPath = filePath;
+                  state.backDone = true;
+                  finishRecordingIfReady();
+                },
+                handleError,
+              ),
+            ),
+            Promise.resolve(
+              frontRecorder.startRecording(
+                filePath => {
+                  const state = recordingStateRef.current;
+                  if (state == null || state.errored) return;
+
+                  state.frontPath = filePath;
+                  state.frontDone = true;
+                  finishRecordingIfReady();
+                },
+                handleError,
+              ),
+            ),
+          ]);
+        } catch (error) {
+          await cancelActiveRecorders();
+          throw error;
+        }
       },
+
       stopRecording: async () => {
-        const recorders = [backRecorderRef.current, frontRecorderRef.current].filter(
-          (recorder): recorder is Recorder => recorder != null,
+        const recorders = [
+          backRecorderRef.current,
+          frontRecorderRef.current,
+        ].filter((recorder): recorder is Recorder => recorder != null);
+
+        if (recorders.length === 0) {
+          return;
+        }
+
+        const results = await Promise.allSettled(
+          recorders.map(recorder => recorder.stopRecording()),
         );
-        if (recorders.length === 0) return;
-        await Promise.all(recorders.map(recorder => recorder.stopRecording()));
+        const rejected = results.find(result => result.status === 'rejected');
+
+        if (rejected?.status === 'rejected') {
+          await cancelActiveRecorders();
+          throw rejected.reason;
+        }
       },
     }),
     [
       backPhotoOutput,
       backVideoOutput,
+      cancelActiveRecorders,
       captureMode,
       finishRecordingIfReady,
       frontPhotoOutput,
@@ -273,31 +399,33 @@ export const VisionCameraMultiCamPreview = forwardRef<
 
   useEffect(() => {
     let cancelled = false;
+
     isReadyRef.current = false;
     onReadyChange?.(false);
-    recordingStateRef.current = null;
-    backRecorderRef.current = null;
-    frontRecorderRef.current = null;
+    resetRecordingRefs();
 
     async function startSession() {
-      if (!active) return;
-      if (!VisionCamera.supportsMultiCamSessions) {
-        onError('当前 VisionCamera 不支持 Multi-Camera Session');
+      if (!active) {
         return;
       }
+
       if (backDevice == null || frontDevice == null) {
         onError('未找到前后摄像头设备');
         return;
       }
 
+      let session: CameraSession | null = null;
+
       try {
-        const session = await VisionCamera.createCameraSession(true);
+        session = await createMultiCamSession();
+
         if (cancelled) {
           await session.stop().catch(() => {});
           return;
         }
 
         sessionRef.current = session;
+
         await session.configure([
           {
             input: backDevice,
@@ -328,7 +456,9 @@ export const VisionCameraMultiCamPreview = forwardRef<
             constraints: [],
           },
         ]);
+
         await session.start();
+
         if (cancelled) {
           await session.stop().catch(() => {});
           return;
@@ -337,8 +467,15 @@ export const VisionCameraMultiCamPreview = forwardRef<
         isReadyRef.current = true;
         onReadyChange?.(true);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        onError(`VisionCamera Multi-Camera 启动失败：${message}`);
+        if (session != null && sessionRef.current === session) {
+          sessionRef.current = null;
+        }
+        await session?.stop().catch(() => {});
+
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : String(error);
+          onError(`VisionCamera Multi-Camera 启动失败：${message}`);
+        }
       }
     }
 
@@ -348,13 +485,9 @@ export const VisionCameraMultiCamPreview = forwardRef<
       cancelled = true;
       isReadyRef.current = false;
       onReadyChange?.(false);
-      const backRecorder = backRecorderRef.current;
-      const frontRecorder = frontRecorderRef.current;
-      backRecorderRef.current = null;
-      frontRecorderRef.current = null;
-      recordingStateRef.current = null;
-      backRecorder?.cancelRecording().catch(() => {});
-      frontRecorder?.cancelRecording().catch(() => {});
+
+      void cancelActiveRecorders();
+
       const session = sessionRef.current;
       sessionRef.current = null;
       session?.stop().catch(() => {});
@@ -365,6 +498,7 @@ export const VisionCameraMultiCamPreview = forwardRef<
     backPhotoOutput,
     backPreviewOutput,
     backVideoOutput,
+    cancelActiveRecorders,
     captureMode,
     frontDevice,
     frontPhotoOutput,
@@ -372,10 +506,13 @@ export const VisionCameraMultiCamPreview = forwardRef<
     frontVideoOutput,
     onError,
     onReadyChange,
+    resetRecordingRefs,
   ]);
 
-  const mainPreviewOutput = mainCamera === 'back' ? backPreviewOutput : frontPreviewOutput;
-  const subPreviewOutput = mainCamera === 'back' ? frontPreviewOutput : backPreviewOutput;
+  const mainPreviewOutput =
+    mainCamera === 'back' ? backPreviewOutput : frontPreviewOutput;
+  const subPreviewOutput =
+    mainCamera === 'back' ? frontPreviewOutput : backPreviewOutput;
   const subLabel = mainCamera === 'back' ? '前摄' : '后摄';
 
   return (
@@ -392,6 +529,7 @@ export const VisionCameraMultiCamPreview = forwardRef<
         resizeMode="cover"
         style={StyleSheet.absoluteFill}
       />
+
       <View
         style={[
           multiCamStyles.pip,

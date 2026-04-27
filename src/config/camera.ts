@@ -45,8 +45,8 @@ export const PHOTO_QUALITY_CONFIG: Record<
   PhotoQuality,
   { label: string; quality: number; nativeQuality: number; priority: 'speed' | 'balanced' | 'quality' }
 > = {
-  high: { label: '高', quality: 1, nativeQuality: 99, priority: 'quality' },
-  standard: { label: '标准', quality: 0.92, nativeQuality: 94, priority: 'balanced' },
+  high: { label: '高', quality: 1, nativeQuality: 100, priority: 'speed' },
+  standard: { label: '标准', quality: 0.92, nativeQuality: 94, priority: 'speed' },
   low: { label: '低', quality: 0.78, nativeQuality: 82, priority: 'speed' },
 };
 

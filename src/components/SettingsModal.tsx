@@ -353,9 +353,9 @@ function SafetyOverlaySection({
 }
 
 function ConcurrentOutputSection({
-  concurrentCompositeLayout,
+  concurrentCompositeLayout: _concurrentCompositeLayout,
   concurrentOutputMode,
-  onConcurrentCompositeLayoutChange,
+  onConcurrentCompositeLayoutChange: _onConcurrentCompositeLayoutChange,
   onConcurrentOutputModeChange,
 }: {
   concurrentCompositeLayout: ConcurrentCompositeLayout;
@@ -364,31 +364,24 @@ function ConcurrentOutputSection({
   onConcurrentOutputModeChange: (value: ConcurrentOutputMode) => void;
 }) {
   return (
-    <SettingsSection title="双摄并发保存">
-      <Chip
-        active={concurrentOutputMode === 'separate'}
-        label="主副分开保存"
-        onPress={() => onConcurrentOutputModeChange('separate')}
-      />
-      <Chip
-        active={concurrentOutputMode === 'composed'}
-        label="合成为一个文件"
-        onPress={() => onConcurrentOutputModeChange('composed')}
-      />
+    <SettingsSection title="真双摄输出">
+      <View style={styles.chipWrap}>
+        <Chip
+          active={concurrentOutputMode === 'separate'}
+          label="主副分开保存"
+          onPress={() => onConcurrentOutputModeChange('separate')}
+        />
+        <Chip
+          active={false}
+          disabled
+          label="合成为一个文件（开发中）"
+          onPress={() => onConcurrentOutputModeChange('separate')}
+        />
+      </View>
       <Text style={styles.settingLine}>
-        {concurrentOutputMode === 'separate'
-          ? '分开保存会保留前后两个原始视角，适合后期剪辑。'
-          : '合成保存会输出一个可直接分享的成片，下面的版式只影响合成文件。'}
+        合成保存尚未接入 VisionCamera Multi-Camera
+        输出管线，当前真双摄仅支持主副分开保存。
       </Text>
-      {concurrentOutputMode === 'composed' &&
-        CONCURRENT_COMPOSITE_LAYOUTS.map(item => (
-          <Chip
-            key={item.id}
-            active={concurrentCompositeLayout === item.id}
-            label={item.label}
-            onPress={() => onConcurrentCompositeLayoutChange(item.id)}
-          />
-        ))}
     </SettingsSection>
   );
 }
