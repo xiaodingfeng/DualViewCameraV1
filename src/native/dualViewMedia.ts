@@ -137,18 +137,41 @@ export const { DualViewMedia } = NativeModules as {
       rotateLandscapeFallback: boolean,
     ): Promise<string>;
     createConcurrentCompositePhoto?(
-      mainPath: string,
-      subPath: string,
-      suffix: string,
+      mainPath: String,
+      subPath: String,
+      suffix: String,
       layout: ConcurrentCompositeLayout,
       format: PhotoFormat,
       quality: number,
     ): Promise<string>;
-    createConcurrentCompositeVideo?(
-      mainPath: string,
-      subPath: string,
-      suffix: string,
+    createConcurrentCompositePhotoWithPip?(
+      mainPath: String,
+      subPath: String,
+      suffix: String,
       layout: ConcurrentCompositeLayout,
+      pipLeftRatio: number,
+      pipTopRatio: number,
+      pipScale: 'small' | 'medium' | 'large',
+      isPortrait: boolean,
+      format: PhotoFormat,
+      quality: number,
+    ): Promise<string>;
+    createConcurrentCompositeVideo?(
+      mainPath: String,
+      subPath: String,
+      suffix: String,
+      layout: ConcurrentCompositeLayout,
+      codec: VideoCodecFormat,
+    ): Promise<string>;
+    createConcurrentCompositeVideoWithPip?(
+      mainPath: String,
+      subPath: String,
+      suffix: String,
+      layout: ConcurrentCompositeLayout,
+      pipLeftRatio: number,
+      pipTopRatio: number,
+      pipScale: 'small' | 'medium' | 'large',
+      isPortrait: boolean,
       codec: VideoCodecFormat,
     ): Promise<string>;
     createWatermarkedCover?(

@@ -28,8 +28,9 @@ import type {
   CaptureMode,
   ConcurrentMainCamera,
   ConcurrentPipLayoutConfig,
+  PreviewLayoutTemplateId,
 } from '../../types/camera';
-import { clamp } from '../../utils/camera';
+import { clamp, wait } from '../../utils/camera';
 
 export type VisionCameraMultiCamHandle = {
   capturePhoto: () => Promise<void>;
@@ -61,6 +62,7 @@ type VisionCameraMultiCamPreviewProps = {
   captureMode: CaptureMode;
   enableAudio: boolean;
   frontDevice: CameraDevice | null;
+  layoutId: PreviewLayoutTemplateId;
   location?: Location | null;
   mainCamera: ConcurrentMainCamera;
   onError: (message: string) => void;
@@ -105,6 +107,7 @@ export const VisionCameraMultiCamPreview = forwardRef<
     captureMode,
     enableAudio,
     frontDevice,
+    layoutId,
     location,
     mainCamera,
     onError,
@@ -136,13 +139,13 @@ export const VisionCameraMultiCamPreview = forwardRef<
   const backVideoOutput = useVideoOutput({
     targetResolution: CommonResolutions.HD_16_9,
     enableAudio: enableAudio && mainCamera === 'back',
-    enablePersistentRecorder: false,
+    enablePersistentRecorder: true,
   });
 
   const frontVideoOutput = useVideoOutput({
     targetResolution: CommonResolutions.HD_16_9,
     enableAudio: enableAudio && mainCamera === 'front',
-    enablePersistentRecorder: false,
+    enablePersistentRecorder: true,
   });
 
   const sessionRef = useRef<CameraSession | null>(null);
@@ -150,9 +153,13 @@ export const VisionCameraMultiCamPreview = forwardRef<
   const backRecorderRef = useRef<Recorder | null>(null);
   const frontRecorderRef = useRef<Recorder | null>(null);
   const recordingStateRef = useRef<RecordingState | null>(null);
-  const startOffsetRef = useRef({ left: 0, top: 0 });
 
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
+  const [localPipLayout, setLocalPipLayout] = useState(pipLayout);
+
+  useEffect(() => {
+    setLocalPipLayout(pipLayout);
+  }, [pipLayout]);
 
   const maxPipLeft = Math.max(
     PIP_MIN_MARGIN,
@@ -166,27 +173,28 @@ export const VisionCameraMultiCamPreview = forwardRef<
   const pipPosition = useMemo(
     () => ({
       left: clamp(
-        pipLayout.leftRatio * Math.max(1, maxPipLeft - PIP_MIN_MARGIN) +
+        localPipLayout.leftRatio * Math.max(1, maxPipLeft - PIP_MIN_MARGIN) +
           PIP_MIN_MARGIN,
         PIP_MIN_MARGIN,
         maxPipLeft,
       ),
       top: clamp(
-        pipLayout.topRatio * Math.max(1, maxPipTop - PIP_MIN_MARGIN) +
+        localPipLayout.topRatio * Math.max(1, maxPipTop - PIP_MIN_MARGIN) +
           PIP_MIN_MARGIN,
         PIP_MIN_MARGIN,
         maxPipTop,
       ),
     }),
-    [maxPipLeft, maxPipTop, pipLayout.leftRatio, pipLayout.topRatio],
+    [maxPipLeft, maxPipTop, localPipLayout.leftRatio, localPipLayout.topRatio],
   );
 
+  const startOffsetRef = useRef({ left: 0, top: 0 });
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, gesture) =>
-          Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
-        onStartShouldSetPanResponder: () => true,
+          layoutId === 'pip' && (Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2),
+        onStartShouldSetPanResponder: () => layoutId === 'pip',
         onPanResponderGrant: () => {
           startOffsetRef.current = pipPosition;
         },
@@ -202,17 +210,16 @@ export const VisionCameraMultiCamPreview = forwardRef<
             maxPipTop,
           );
 
-          onPipLayoutChange?.({
-            leftRatio:
-              (left - PIP_MIN_MARGIN) /
-              Math.max(1, maxPipLeft - PIP_MIN_MARGIN),
-            topRatio:
-              (top - PIP_MIN_MARGIN) /
-              Math.max(1, maxPipTop - PIP_MIN_MARGIN),
-          });
+          const leftRatio = (left - PIP_MIN_MARGIN) / Math.max(1, maxPipLeft - PIP_MIN_MARGIN);
+          const topRatio = (top - PIP_MIN_MARGIN) / Math.max(1, maxPipTop - PIP_MIN_MARGIN);
+
+          setLocalPipLayout({ leftRatio, topRatio });
+        },
+        onPanResponderRelease: () => {
+          onPipLayoutChange?.(localPipLayout);
         },
       }),
-    [maxPipLeft, maxPipTop, onPipLayoutChange, pipPosition],
+    [layoutId, maxPipLeft, maxPipTop, onPipLayoutChange, pipPosition, localPipLayout],
   );
 
   const resetRecordingRefs = useCallback(() => {
@@ -300,14 +307,13 @@ export const VisionCameraMultiCamPreview = forwardRef<
         const recorderSettings = location ? { location } : {};
 
         try {
-          const [backRecorder, frontRecorder] = await Promise.all([
-            backVideoOutput.createRecorder(
+          const backRecorder = await backVideoOutput.createRecorder(
               mainCamera === 'back' ? recorderSettings : {},
-            ),
-            frontVideoOutput.createRecorder(
+          );
+          await wait(150);
+          const frontRecorder = await frontVideoOutput.createRecorder(
               mainCamera === 'front' ? recorderSettings : {},
-            ),
-          ]);
+          );
 
           backRecorderRef.current = backRecorder;
           frontRecorderRef.current = frontRecorder;
@@ -318,6 +324,7 @@ export const VisionCameraMultiCamPreview = forwardRef<
           };
 
           const handleError = (error: Error) => {
+            console.log('Concurrent recording error:', error);
             const state = recordingStateRef.current;
             if (state != null) {
               state.errored = true;
@@ -327,34 +334,31 @@ export const VisionCameraMultiCamPreview = forwardRef<
             onError(error.message || '双摄并发录像失败');
           };
 
-          await Promise.all([
-            Promise.resolve(
-              backRecorder.startRecording(
-                filePath => {
-                  const state = recordingStateRef.current;
-                  if (state == null || state.errored) return;
+          await backRecorder.startRecording(
+            filePath => {
+              const state = recordingStateRef.current;
+              if (state == null || state.errored) return;
 
-                  state.backPath = filePath;
-                  state.backDone = true;
-                  finishRecordingIfReady();
-                },
-                handleError,
-              ),
-            ),
-            Promise.resolve(
-              frontRecorder.startRecording(
-                filePath => {
-                  const state = recordingStateRef.current;
-                  if (state == null || state.errored) return;
+              state.backPath = filePath;
+              state.backDone = true;
+              finishRecordingIfReady();
+            },
+            handleError,
+          );
 
-                  state.frontPath = filePath;
-                  state.frontDone = true;
-                  finishRecordingIfReady();
-                },
-                handleError,
-              ),
-            ),
-          ]);
+          await wait(350); // Increased delay between recorder starts for emulator stability
+
+          await frontRecorder.startRecording(
+            filePath => {
+              const state = recordingStateRef.current;
+              if (state == null || state.errored) return;
+
+              state.frontPath = filePath;
+              state.frontDone = true;
+              finishRecordingIfReady();
+            },
+            handleError,
+          );
         } catch (error) {
           await cancelActiveRecorders();
           throw error;
@@ -490,7 +494,18 @@ export const VisionCameraMultiCamPreview = forwardRef<
 
       const session = sessionRef.current;
       sessionRef.current = null;
-      session?.stop().catch(() => {});
+      if (session != null) {
+        void (async () => {
+          try {
+            await session.stop();
+            if (typeof (session as any).close === 'function') {
+              await (session as any).close();
+            }
+          } catch (e) {
+             console.log('Multi-camera session cleanup error:', e);
+          }
+        })();
+      }
     };
   }, [
     active,
@@ -504,6 +519,7 @@ export const VisionCameraMultiCamPreview = forwardRef<
     frontPhotoOutput,
     frontPreviewOutput,
     frontVideoOutput,
+    mainCamera,
     onError,
     onReadyChange,
     resetRecordingRefs,
@@ -515,6 +531,107 @@ export const VisionCameraMultiCamPreview = forwardRef<
     mainCamera === 'back' ? frontPreviewOutput : backPreviewOutput;
   const subLabel = mainCamera === 'back' ? '前摄' : '后摄';
 
+  const renderLayout = () => {
+    if (layoutId === 'split-horizontal') {
+      return (
+        <View style={StyleSheet.absoluteFill}>
+          <View style={multiCamStyles.splitHorizontalHalf}>
+             <NativePreviewView
+               implementationMode="compatible"
+               previewOutput={mainPreviewOutput}
+               resizeMode="cover"
+               style={StyleSheet.absoluteFill}
+             />
+          </View>
+          <View style={multiCamStyles.splitHorizontalHalf}>
+             <NativePreviewView
+               implementationMode="compatible"
+               previewOutput={subPreviewOutput}
+               resizeMode="cover"
+               style={StyleSheet.absoluteFill}
+             />
+          </View>
+        </View>
+      );
+    }
+
+    if (layoutId === 'split-vertical') {
+      return (
+        <View style={StyleSheet.absoluteFill}>
+          <View style={multiCamStyles.splitVerticalHalf}>
+             <NativePreviewView
+               implementationMode="compatible"
+               previewOutput={mainPreviewOutput}
+               resizeMode="cover"
+               style={StyleSheet.absoluteFill}
+             />
+          </View>
+          <View style={multiCamStyles.splitVerticalHalf}>
+             <NativePreviewView
+               implementationMode="compatible"
+               previewOutput={subPreviewOutput}
+               resizeMode="cover"
+               style={StyleSheet.absoluteFill}
+             />
+          </View>
+        </View>
+      );
+    }
+
+    if (layoutId === 'stack') {
+       return (
+         <View style={StyleSheet.absoluteFill}>
+           <View style={multiCamStyles.stackMain}>
+              <NativePreviewView
+                implementationMode="compatible"
+                previewOutput={mainPreviewOutput}
+                resizeMode="cover"
+                style={StyleSheet.absoluteFill}
+              />
+           </View>
+           <View style={multiCamStyles.stackSub}>
+              <NativePreviewView
+                implementationMode="compatible"
+                previewOutput={subPreviewOutput}
+                resizeMode="cover"
+                style={StyleSheet.absoluteFill}
+              />
+           </View>
+         </View>
+       );
+    }
+
+    return (
+      <View style={StyleSheet.absoluteFill}>
+        <NativePreviewView
+          implementationMode="compatible"
+          previewOutput={mainPreviewOutput}
+          resizeMode="cover"
+          style={StyleSheet.absoluteFill}
+        />
+
+        <View
+          style={[
+            multiCamStyles.pip,
+            {
+              left: pipPosition.left,
+              top: pipPosition.top,
+            },
+          ]}
+          {...panResponder.panHandlers}
+        >
+          <NativePreviewView
+            implementationMode="compatible"
+            previewOutput={subPreviewOutput}
+            resizeMode="cover"
+            style={StyleSheet.absoluteFill}
+          />
+          <Text style={multiCamStyles.pipLabel}>{subLabel}</Text>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <View
       style={StyleSheet.absoluteFill}
@@ -523,31 +640,7 @@ export const VisionCameraMultiCamPreview = forwardRef<
         setPreviewSize({ width, height });
       }}
     >
-      <NativePreviewView
-        implementationMode="compatible"
-        previewOutput={mainPreviewOutput}
-        resizeMode="cover"
-        style={StyleSheet.absoluteFill}
-      />
-
-      <View
-        style={[
-          multiCamStyles.pip,
-          {
-            left: pipPosition.left,
-            top: pipPosition.top,
-          },
-        ]}
-        {...panResponder.panHandlers}
-      >
-        <NativePreviewView
-          implementationMode="compatible"
-          previewOutput={subPreviewOutput}
-          resizeMode="cover"
-          style={StyleSheet.absoluteFill}
-        />
-        <Text style={multiCamStyles.pipLabel}>{subLabel}</Text>
-      </View>
+      {renderLayout()}
     </View>
   );
 });
@@ -572,5 +665,23 @@ const multiCamStyles = StyleSheet.create({
     fontWeight: '900',
     textShadowColor: '#000',
     textShadowRadius: 4,
+  },
+  splitHorizontalHalf: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+  splitVerticalHalf: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+  stackMain: {
+    flex: 3,
+    overflow: 'hidden',
+  },
+  stackSub: {
+    flex: 1,
+    overflow: 'hidden',
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
 });

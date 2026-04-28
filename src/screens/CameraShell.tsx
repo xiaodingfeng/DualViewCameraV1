@@ -637,12 +637,8 @@ function CameraShell({
             setConcurrentMainCamera(settings.concurrentMainCamera);
           }
           if (isConcurrentOutputMode(settings.concurrentOutputMode)) {
-          setConcurrentOutputMode(
-            settings.concurrentOutputMode === 'composed'
-              ? 'separate'
-              : settings.concurrentOutputMode,
-          );
-        }
+            setConcurrentOutputMode(settings.concurrentOutputMode);
+          }
           if (isConcurrentCompositeLayout(settings.concurrentCompositeLayout)) {
             setConcurrentCompositeLayout(settings.concurrentCompositeLayout);
           }
@@ -840,18 +836,20 @@ function CameraShell({
     if (viewMode === 'dual') {
       // 1. If actively recording or warming up recording, use the
       // lightest stable recording pipe: one preview + video only.
-      if (isVideoSessionTarget || captureMode === 'video') {
+      if (isVideoSessionTarget) {
         return [mainPreviewOutput, videoOutput];
       }
 
-      // 2. Dual photo standby keeps the PIP preview and photo output,
-      // but does not keep the video output attached.
+      // 2. In video standby mode (not recording), we can show both previews.
+      if (captureMode === 'video') {
+        return [mainPreviewOutput, pipPreviewOutput];
+      }
+
+      // 3. Dual photo standby keeps the PIP preview and photo output.
       return [mainPreviewOutput, pipPreviewOutput, photoOutput];
     }
 
     // Single mode: attach only the output required by the active mode.
-    // This keeps full photo quality, but avoids the photo pipeline sharing
-    // bandwidth with an unused video output while taking stills.
     return captureMode === 'video'
       ? [mainPreviewOutput, videoOutput]
       : [mainPreviewOutput, photoOutput];
@@ -928,7 +926,7 @@ function CameraShell({
       if (appStateRef.current !== 'active') return;
       setSessionRevision(curr => curr + 1);
       setIsAppActive(true);
-    }, 450);
+    }, 1500);
 
     return () => clearTimeout(timer);
   }, [isConcurrentSourceMode]);
@@ -1328,110 +1326,110 @@ function CameraShell({
             await runQueuedMediaJob(async () => {
               await applyJobPatch({ status: 'running', progress: 0.08 });
               if (options.dual) {
-              const { mainPath, subPath } = await createDualPhotoVariantsForAspects(
-                  filePath,
-                  options.mainSpec,
-                  options.subSpec,
-                  options.format,
-                  options.quality,
-                  options.mirror,
-                  options.rotateLandscapeFallback,
-              );
-              await applyJobPatch({ status: 'running', progress: 0.45 });
+                const { mainPath, subPath } = await createDualPhotoVariantsForAspects(
+                    filePath,
+                    options.mainSpec,
+                    options.subSpec,
+                    options.format,
+                    options.quality,
+                    options.mirror,
+                    options.rotateLandscapeFallback,
+                );
+                await applyJobPatch({ status: 'running', progress: 0.45 });
 
-              const [mainSaved, subSaved] = await Promise.all([
-                saveToGallery(mainPath, 'photo', '主画面'),
-                saveToGallery(subPath, 'photo', '副画面'),
-              ]);
-              const coverAsset = await createAndSaveCoverAsset({
-                captureId,
-                createdAt,
-                dual: true,
-                mainLocalPath: mainSaved.localPath ?? mainPath,
-                sourceUri: filePath,
-              });
-              await applyJobPatch({ status: 'running', progress: 0.78 });
-              await saveCaptureGroupToIndex({
-                captureId,
-                createdAt,
-                assets: [
-                  buildReadyAsset({
-                    captureId,
-                    createdAt,
-                    type: 'photo',
-                    role: 'main',
-                    aspect: selectedAspectId,
+                const [mainSaved, subSaved] = await Promise.all([
+                  saveToGallery(mainPath, 'photo', '主画面'),
+                  saveToGallery(subPath, 'photo', '副画面'),
+                ]);
+
+                const coverAsset = await createAndSaveCoverAsset({
+                  captureId,
+                  createdAt,
+                  dual: true,
+                  mainLocalPath: mainSaved.localPath ?? mainPath,
+                  sourceUri: filePath,
+                });
+                await applyJobPatch({ status: 'running', progress: 0.78 });
+                await saveCaptureGroupToIndex({
+                  captureId,
+                  createdAt,
+                  assets: [
+                    buildReadyAsset({
+                      captureId,
+                      createdAt,
+                      type: 'photo',
+                      role: 'main',
+                      aspect: selectedAspectId,
+                      uri: mainSaved.uri,
+                      localPath: mainSaved.localPath,
+                      sourceUri: filePath,
+                    }),
+                    buildReadyAsset({
+                      captureId,
+                      createdAt,
+                      type: 'photo',
+                      role: 'sub',
+                      aspect: selectedAspectId,
+                      uri: subSaved.uri,
+                      localPath: subSaved.localPath,
+                      sourceUri: filePath,
+                    }),
+                    ...(coverAsset ? [coverAsset] : []),
+                  ],
+                });
+                await applyJobPatch({
+                  status: 'succeeded',
+                  progress: 1,
+                  output: {
+                    mainUri: mainSaved.uri,
+                    subUri: subSaved.uri,
+                  },
+                });
+              } else {
+                const mainPath = await createPhotoVariantForAspect(
+                    filePath,
+                    options.mainSpec,
+                    'main',
+                    options.format,
+                    options.quality,
+                    options.mirror,
+                    options.rotateLandscapeFallback.main,
+                );
+                await applyJobPatch({ status: 'running', progress: 0.55 });
+                const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
+                const coverAsset = await createAndSaveCoverAsset({
+                  captureId,
+                  createdAt,
+                  dual: false,
+                  mainLocalPath: mainSaved.localPath ?? mainPath,
+                  sourceUri: filePath,
+                });
+                await saveCaptureGroupToIndex({
+                  captureId,
+                  createdAt,
+                  assets: [
+                    buildReadyAsset({
+                      captureId,
+                      createdAt,
+                      type: 'photo',
+                      role: 'main',
+                      aspect: selectedAspectId,
+                      uri: mainSaved.uri,
+                      localPath: mainSaved.localPath,
+                      sourceUri: filePath,
+                    }),
+                    ...(coverAsset ? [coverAsset] : []),
+                  ],
+                });
+                await applyJobPatch({
+                  status: 'succeeded',
+                  progress: 1,
+                  output: {
                     uri: mainSaved.uri,
                     localPath: mainSaved.localPath,
-                    sourceUri: filePath,
-                  }),
-                  buildReadyAsset({
-                    captureId,
-                    createdAt,
-                    type: 'photo',
-                    role: 'sub',
-                    aspect: selectedAspectId,
-                    uri: subSaved.uri,
-                    localPath: subSaved.localPath,
-                    sourceUri: filePath,
-                  }),
-                  ...(coverAsset ? [coverAsset] : []),
-                ],
-              });
-              await applyJobPatch({
-                status: 'succeeded',
-                progress: 1,
-                output: {
-                  mainUri: mainSaved.uri,
-                  subUri: subSaved.uri,
-                },
-              });
-            } else {
-              const mainPath = await createPhotoVariantForAspect(
-                  filePath,
-                  options.mainSpec,
-                  'main',
-                  options.format,
-                  options.quality,
-                  options.mirror,
-                  options.rotateLandscapeFallback.main,
-              );
-              await applyJobPatch({ status: 'running', progress: 0.55 });
-              await applyJobPatch({ status: 'running', progress: 0.82 });
-              const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
-              const coverAsset = await createAndSaveCoverAsset({
-                captureId,
-                createdAt,
-                dual: false,
-                mainLocalPath: mainSaved.localPath ?? mainPath,
-                sourceUri: filePath,
-              });
-              await saveCaptureGroupToIndex({
-                captureId,
-                createdAt,
-                assets: [
-                  buildReadyAsset({
-                    captureId,
-                    createdAt,
-                    type: 'photo',
-                    role: 'main',
-                    aspect: selectedAspectId,
-                    uri: mainSaved.uri,
-                    localPath: mainSaved.localPath,
-                    sourceUri: filePath,
-                  }),
-                  ...(coverAsset ? [coverAsset] : []),
-                ],
-              });
-              await applyJobPatch({
-                status: 'succeeded',
-                progress: 1,
-                output: {
-                  uri: mainSaved.uri,
-                  localPath: mainSaved.localPath,
-                },
-              });
-            }
+                  },
+                });
+              }
             });
           } catch (error) {
             const message = cameraErrorMessage(error, '照片保存失败');
@@ -1447,7 +1445,7 @@ function CameraShell({
                   captureId,
                   createdAt,
                   type: 'photo',
-                  role: options.dual ? 'sub' : 'main',
+                  role: 'main',
                   aspect: selectedAspectId,
                   sourceUri: filePath,
                   errorMessage: message,
@@ -1621,7 +1619,6 @@ function CameraShell({
                 await runQueuedMediaJob(async () => {
                 await applyJobPatch({ status: 'running', progress: 0.08 });
                 const subVariant = saveSubFrameSpec.variant;
-                await applyJobPatch({ status: 'running', progress: 0.35 });
                 const subPath = await createVideoVariant(
                     filePath,
                     subVariant,
@@ -2132,14 +2129,18 @@ function CameraShell({
         const { mainPath, subPath, mainLabel, subLabel } = concurrentOrderedPaths(result);
         try {
           if (concurrentOutputMode === 'composed') {
-            if (!DualViewMedia?.createConcurrentCompositePhoto) {
+            if (!DualViewMedia?.createConcurrentCompositePhotoWithPip) {
               throw new Error('当前版本缺少双摄合成照片保存能力');
             }
-            const composedPath = await DualViewMedia.createConcurrentCompositePhoto(
+            const composedPath = await DualViewMedia.createConcurrentCompositePhotoWithPip(
                 mainPath,
                 subPath,
                 'concurrent-composed',
                 concurrentCompositeLayout,
+                concurrentPipLayout.leftRatio,
+                concurrentPipLayout.topRatio,
+                'medium', // Concurrent PiP scale is currently fixed or handled differently in Preview
+                !isDeviceLandscape,
                 photoFormat,
                 photoQualityConfig.nativeQuality,
             );
@@ -2205,8 +2206,10 @@ function CameraShell({
       },
       [
         concurrentCompositeLayout,
+        concurrentPipLayout,
         concurrentOrderedPaths,
         concurrentOutputMode,
+        isDeviceLandscape,
         photoFormat,
         photoQualityConfig.nativeQuality,
         refreshGallery,
@@ -2226,14 +2229,18 @@ function CameraShell({
         const { mainPath, subPath, mainLabel, subLabel } = concurrentOrderedPaths(result);
         try {
           if (concurrentOutputMode === 'composed') {
-            if (!DualViewMedia?.createConcurrentCompositeVideo) {
+            if (!DualViewMedia?.createConcurrentCompositeVideoWithPip) {
               throw new Error('当前版本缺少双摄合成录像保存能力');
             }
-            const composedPath = await DualViewMedia.createConcurrentCompositeVideo(
+            const composedPath = await DualViewMedia.createConcurrentCompositeVideoWithPip(
                 mainPath,
                 subPath,
                 'concurrent-composed',
                 concurrentCompositeLayout,
+                concurrentPipLayout.leftRatio,
+                concurrentPipLayout.topRatio,
+                'medium',
+                !isDeviceLandscape,
                 videoCodec,
             );
             const saved = await saveToGallery(composedPath, 'video', '双摄合成录像');
@@ -2300,8 +2307,10 @@ function CameraShell({
       },
       [
         concurrentCompositeLayout,
+        concurrentPipLayout,
         concurrentOrderedPaths,
         concurrentOutputMode,
+        isDeviceLandscape,
         refreshGallery,
         saveCaptureGroupToIndex,
         saveToGallery,
@@ -2404,6 +2413,7 @@ function CameraShell({
                       captureMode={captureMode}
                       enableAudio={microphoneReady}
                       frontDevice={frontDevice}
+                      layoutId={previewLayoutTemplate}
                       location={captureLocation.currentLocation}
                       mainCamera={concurrentMainCamera}
                       onError={handleConcurrentError}

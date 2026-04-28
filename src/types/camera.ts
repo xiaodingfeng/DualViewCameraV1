@@ -37,7 +37,7 @@ export type VideoCodecFormat = 'h265' | 'h264';
 export type SafetyOverlayMode = 'off' | 'subtle' | 'strong';
 export type ConcurrentMainCamera = 'back' | 'front';
 export type ConcurrentOutputMode = 'separate' | 'composed';
-export type ConcurrentCompositeLayout = 'split-horizontal' | 'split-vertical' | 'stack';
+export type ConcurrentCompositeLayout = 'pip' | 'split-horizontal' | 'split-vertical' | 'stack';
 export type ConcurrentPipLayoutConfig = {
   leftRatio: number;
   topRatio: number;

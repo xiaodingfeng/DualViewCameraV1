@@ -398,7 +398,12 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
         return
       }
 
-      val decoded = BitmapFactory.decodeFile(source.absolutePath)
+      val options = BitmapFactory.Options().apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          inPreferredColorSpace = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
+        }
+      }
+      val decoded = BitmapFactory.decodeFile(source.absolutePath, options)
       if (decoded == null) {
         promise.reject("EDECODE", "Unable to decode source photo: ${source.absolutePath}")
         return
@@ -487,11 +492,15 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun createConcurrentCompositePhoto(
+  fun createConcurrentCompositePhotoWithPip(
       mainPath: String,
       subPath: String,
       suffix: String,
       layout: String,
+      pipLeftRatio: Double,
+      pipTopRatio: Double,
+      pipScale: String,
+      isPortrait: Boolean,
       format: String,
       quality: Double,
       promise: Promise
@@ -508,8 +517,13 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
         return
       }
 
-      val mainDecoded = BitmapFactory.decodeFile(mainSource.absolutePath)
-      val subDecoded = BitmapFactory.decodeFile(subSource.absolutePath)
+      val options = BitmapFactory.Options().apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          inPreferredColorSpace = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
+        }
+      }
+      val mainDecoded = BitmapFactory.decodeFile(mainSource.absolutePath, options)
+      val subDecoded = BitmapFactory.decodeFile(subSource.absolutePath, options)
       if (mainDecoded == null || subDecoded == null) {
         mainDecoded?.recycle()
         subDecoded?.recycle()
@@ -519,7 +533,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
       val mainUpright = applyExifOrientation(mainDecoded, mainSource.absolutePath)
       val subUpright = applyExifOrientation(subDecoded, subSource.absolutePath)
-      val rects = concurrentCompositeRects(layout)
+      val rects = concurrentCompositeRectsWithPip(layout, pipLeftRatio, pipTopRatio, pipScale, isPortrait)
       val target = Bitmap.createBitmap(rects.width, rects.height, Bitmap.Config.ARGB_8888)
       val canvas = Canvas(target)
       canvas.drawColor(Color.BLACK)
@@ -554,11 +568,15 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun createConcurrentCompositeVideo(
+  fun createConcurrentCompositeVideoWithPip(
       mainPath: String,
       subPath: String,
       suffix: String,
       layout: String,
+      pipLeftRatio: Double,
+      pipTopRatio: Double,
+      pipScale: String,
+      isPortrait: Boolean,
       codec: String,
       promise: Promise
   ) {
@@ -582,7 +600,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
           mainSource,
           subSource,
           target,
-          concurrentCompositeRects(layout),
+          concurrentCompositeRectsWithPip(layout, pipLeftRatio, pipTopRatio, pipScale, isPortrait),
           videoCodecMimeType(codec),
           promise
       )
@@ -768,19 +786,154 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     )
   }
 
-  private data class VideoTransformTask(
-      val source: File,
-      val target: File,
-      val targetSpec: VideoTargetSpec,
-      val targetCodec: String,
-      val mirror: Boolean,
-      val rotateLandscapeFallback: Boolean,
-      val promise: Promise
-  )
+  private fun concurrentCompositeRects(layout: String): CompositeRects {
+      return concurrentCompositeRectsWithPip(layout, 0.5, 0.5, "medium", false)
+  }
 
-  private data class VideoTargetSpec(val width: Int, val height: Int)
-  private data class VideoDisplaySpec(val width: Double, val height: Double, val mimeType: String?)
-  private data class CompositeRects(val width: Int, val height: Int, val main: RectF, val sub: RectF)
+  private fun concurrentCompositeRectsWithPip(layout: String, pipLeftRatio: Double, pipTopRatio: Double, pipScale: String, isPortrait: Boolean): CompositeRects {
+    val baseW = 1280
+    val baseH = 720
+    val width = if (isPortrait) baseH else baseW
+    val height = if (isPortrait) baseW else baseH
+
+    return when (layout) {
+      "split-vertical" -> CompositeRects(
+          width,
+          height,
+          RectF(0f, 0f, width.toFloat(), height * 0.5f),
+          RectF(0f, height * 0.5f, width.toFloat(), height.toFloat())
+      )
+      "split-horizontal" -> CompositeRects(
+          width,
+          height,
+          RectF(0f, 0f, width * 0.5f, height.toFloat()),
+          RectF(width * 0.5f, 0f, width.toFloat(), height.toFloat())
+      )
+      "stack" -> {
+        CompositeRects(
+            width,
+            height,
+            RectF(0f, 0f, width.toFloat(), height * 0.75f),
+            RectF(0f, height * 0.75f, width.toFloat(), height.toFloat())
+        )
+      }
+      "pip" -> {
+        val pipW = when(pipScale) {
+            "small" -> 142f * 0.8f
+            "large" -> 142f * 1.2f
+            else -> 142f
+        } * (width / (if (isPortrait) 360f else 640f))
+        val pipH = when(pipScale) {
+            "small" -> 190f * 0.8f
+            "large" -> 190f * 1.2f
+            else -> 190f
+        } * (height / (if (isPortrait) 640f else 360f))
+
+        val left = (pipLeftRatio * (width - pipW)).toFloat()
+        val top = (pipTopRatio * (height - pipH)).toFloat()
+
+        CompositeRects(
+            width,
+            height,
+            RectF(0f, 0f, width.toFloat(), height.toFloat()),
+            RectF(left, top, left + pipW, top + pipH)
+        )
+      }
+      else -> CompositeRects(
+          width,
+          height,
+          RectF(0f, 0f, width * 0.5f, height.toFloat()),
+          RectF(width * 0.5f, 0f, width.toFloat(), height.toFloat())
+      )
+    }
+  }
+
+  private fun drawCoverBitmap(
+      source: Bitmap,
+      title: String,
+      dateText: String,
+      infoText: String,
+      templateId: String
+  ): Bitmap {
+    val width = 1280
+    val height = 720
+    val target = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(target)
+    val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    val cropped = centerCrop(source, width.toDouble() / height.toDouble())
+
+    canvas.drawColor(Color.rgb(8, 10, 12))
+    canvas.drawBitmap(cropped, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), bitmapPaint)
+
+    val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = when (templateId) {
+        "vlog-title" -> Color.rgb(255, 209, 102)
+        "dual-card" -> Color.rgb(122, 162, 255)
+        else -> Color.WHITE
+      }
+      strokeWidth = 6f
+    }
+    canvas.drawLine(54f, height - 154f, 150f, height - 154f, accentPaint)
+
+    val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      textSize = 56f
+      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      setShadowLayer(8f, 0f, 3f, Color.argb(180, 0, 0, 0))
+    }
+    val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(220, 255, 255, 255)
+      textSize = 28f
+      typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+      setShadowLayer(6f, 0f, 2f, Color.argb(180, 0, 0, 0))
+    }
+
+    val displayTitle = title.ifBlank {
+      if (templateId == "vlog-title") "VLOG" else "Dual View"
+    }
+    canvas.drawText(displayTitle.take(28), 54f, height - 96f, titlePaint)
+    if (dateText.isNotBlank()) {
+      canvas.drawText(dateText.take(24), 54f, height - 48f, metaPaint)
+    }
+    if (infoText.isNotBlank()) {
+      val displayInfo = infoText.take(32)
+      val textWidth = metaPaint.measureText(displayInfo)
+      canvas.drawText(displayInfo, width - textWidth - 54f, height - 48f, metaPaint)
+    }
+
+    if (cropped !== source) cropped.recycle()
+    return target
+  }
+
+  private fun orientBitmapForTargetAspect(source: Bitmap, targetAspect: Double, rotateLandscapeFallback: Boolean): Bitmap {
+    val wantsLandscape = targetAspect > 1.0
+    val sourceIsPortrait = source.height > source.width
+    if (!rotateLandscapeFallback || !wantsLandscape || !sourceIsPortrait) return source
+
+    val matrix = Matrix().apply {
+      postRotate(90f)
+    }
+    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+  }
+
+  private fun mirrorBitmap(source: Bitmap): Bitmap {
+    val matrix = Matrix().apply {
+      preScale(-1f, 1f)
+    }
+    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+  }
+
+  private fun copyExifLocation(sourcePath: String?, targetPath: String) {
+    if (sourcePath.isNullOrBlank()) return
+    try {
+      val latLong = ExifInterface(sourcePath).latLong ?: return
+      ExifInterface(targetPath).apply {
+        setLatLong(latLong[0], latLong[1])
+        saveAttributes()
+      }
+    } catch (_: Throwable) {
+    }
+  }
 
   private fun photoAspectForVariant(variant: String): Double {
     return when (variant) {
@@ -905,118 +1058,6 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     canvas.drawBitmap(source, srcRect, targetRect, paint)
   }
 
-  private fun concurrentCompositeRects(layout: String): CompositeRects {
-    val width = 1280
-    val height = 720
-    return when (layout) {
-      "split-vertical" -> CompositeRects(
-          width,
-          height,
-          RectF(0f, 0f, width.toFloat(), height * 0.5f),
-          RectF(0f, height * 0.5f, width.toFloat(), height.toFloat())
-      )
-      "stack" -> CompositeRects(
-          width,
-          height,
-          RectF(0f, 0f, width.toFloat(), height * 0.75f),
-          RectF(0f, height * 0.75f, width.toFloat(), height.toFloat())
-      )
-      else -> CompositeRects(
-          width,
-          height,
-          RectF(0f, 0f, width * 0.5f, height.toFloat()),
-          RectF(width * 0.5f, 0f, width.toFloat(), height.toFloat())
-      )
-    }
-  }
-
-  private fun drawCoverBitmap(
-      source: Bitmap,
-      title: String,
-      dateText: String,
-      infoText: String,
-      templateId: String
-  ): Bitmap {
-    val width = 1280
-    val height = 720
-    val target = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(target)
-    val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    val cropped = centerCrop(source, width.toDouble() / height.toDouble())
-
-    canvas.drawColor(Color.rgb(8, 10, 12))
-    canvas.drawBitmap(cropped, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), bitmapPaint)
-
-    val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = when (templateId) {
-        "vlog-title" -> Color.rgb(255, 209, 102)
-        "dual-card" -> Color.rgb(122, 162, 255)
-        else -> Color.WHITE
-      }
-      strokeWidth = 6f
-    }
-    canvas.drawLine(54f, height - 154f, 150f, height - 154f, accentPaint)
-
-    val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = Color.WHITE
-      textSize = 56f
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-      setShadowLayer(8f, 0f, 3f, Color.argb(180, 0, 0, 0))
-    }
-    val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = Color.argb(220, 255, 255, 255)
-      textSize = 28f
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-      setShadowLayer(6f, 0f, 2f, Color.argb(180, 0, 0, 0))
-    }
-
-    val displayTitle = title.ifBlank {
-      if (templateId == "vlog-title") "VLOG" else "Dual View"
-    }
-    canvas.drawText(displayTitle.take(28), 54f, height - 96f, titlePaint)
-    if (dateText.isNotBlank()) {
-      canvas.drawText(dateText.take(24), 54f, height - 48f, metaPaint)
-    }
-    if (infoText.isNotBlank()) {
-      val displayInfo = infoText.take(32)
-      val textWidth = metaPaint.measureText(displayInfo)
-      canvas.drawText(displayInfo, width - textWidth - 54f, height - 48f, metaPaint)
-    }
-
-    if (cropped !== source) cropped.recycle()
-    return target
-  }
-
-  private fun orientBitmapForTargetAspect(source: Bitmap, targetAspect: Double, rotateLandscapeFallback: Boolean): Bitmap {
-    val wantsLandscape = targetAspect > 1.0
-    val sourceIsPortrait = source.height > source.width
-    if (!rotateLandscapeFallback || !wantsLandscape || !sourceIsPortrait) return source
-
-    val matrix = Matrix().apply {
-      postRotate(90f)
-    }
-    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-  }
-
-  private fun mirrorBitmap(source: Bitmap): Bitmap {
-    val matrix = Matrix().apply {
-      preScale(-1f, 1f)
-    }
-    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-  }
-
-  private fun copyExifLocation(sourcePath: String?, targetPath: String) {
-    if (sourcePath.isNullOrBlank()) return
-    try {
-      val latLong = ExifInterface(sourcePath).latLong ?: return
-      ExifInterface(targetPath).apply {
-        setLatLong(latLong[0], latLong[1])
-        saveAttributes()
-      }
-    } catch (_: Throwable) {
-    }
-  }
-
   private fun safeSuffix(value: String): String {
     return value.replace(Regex("[^A-Za-z0-9_-]+"), "_").ifBlank { "media" }
   }
@@ -1060,4 +1101,18 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   private fun videoCodecMimeType(codec: String): String {
     return if (codec == "h264") MimeTypes.VIDEO_H264 else MimeTypes.VIDEO_H265
   }
+
+  private data class VideoTransformTask(
+      val source: File,
+      val target: File,
+      val targetSpec: VideoTargetSpec,
+      val targetCodec: String,
+      val mirror: Boolean,
+      val rotateLandscapeFallback: Boolean,
+      val promise: Promise
+  )
+
+  private data class VideoTargetSpec(val width: Int, val height: Int)
+  private data class VideoDisplaySpec(val width: Double, val height: Double, val mimeType: String?)
+  private data class CompositeRects(val width: Int, val height: Int, val main: RectF, val sub: RectF)
 }

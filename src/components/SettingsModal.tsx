@@ -353,9 +353,9 @@ function SafetyOverlaySection({
 }
 
 function ConcurrentOutputSection({
-  concurrentCompositeLayout: _concurrentCompositeLayout,
+  concurrentCompositeLayout,
   concurrentOutputMode,
-  onConcurrentCompositeLayoutChange: _onConcurrentCompositeLayoutChange,
+  onConcurrentCompositeLayoutChange,
   onConcurrentOutputModeChange,
 }: {
   concurrentCompositeLayout: ConcurrentCompositeLayout;
@@ -372,15 +372,31 @@ function ConcurrentOutputSection({
           onPress={() => onConcurrentOutputModeChange('separate')}
         />
         <Chip
-          active={false}
-          disabled
-          label="合成为一个文件（开发中）"
-          onPress={() => onConcurrentOutputModeChange('separate')}
+          active={concurrentOutputMode === 'composed'}
+          label="合成为一个文件"
+          onPress={() => onConcurrentOutputModeChange('composed')}
         />
       </View>
+
+      {concurrentOutputMode === 'composed' && (
+        <View style={{ marginTop: 12 }}>
+          <Text style={[styles.sectionTitle, { fontSize: 12, marginBottom: 8 }]}>合成布局</Text>
+          <View style={styles.chipWrap}>
+            {CONCURRENT_COMPOSITE_LAYOUTS.map(item => (
+              <Chip
+                key={item.id}
+                active={concurrentCompositeLayout === item.id}
+                label={item.label}
+                onPress={() => onConcurrentCompositeLayoutChange(item.id)}
+              />
+            ))}
+          </View>
+        </View>
+      )}
       <Text style={styles.settingLine}>
-        合成保存尚未接入 VisionCamera Multi-Camera
-        输出管线，当前真双摄仅支持主副分开保存。
+        {concurrentOutputMode === 'composed'
+          ? '合成模式将按预览布局生成单个文件；录像合成可能增加耗电和处理时间。'
+          : '分开保存模式会生成主摄和副摄两个独立原始文件。'}
       </Text>
     </SettingsSection>
   );
@@ -426,6 +442,7 @@ const PREVIEW_LAYOUT_TEMPLATES: Array<{ id: PreviewLayoutTemplateId; label: stri
 ];
 
 const CONCURRENT_COMPOSITE_LAYOUTS: Array<{ id: ConcurrentCompositeLayout; label: string }> = [
+  { id: 'pip', label: '画中画' },
   { id: 'split-horizontal', label: '左右分屏' },
   { id: 'split-vertical', label: '上下分屏' },
   { id: 'stack', label: '主图+副条' },

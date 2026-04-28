@@ -82,7 +82,7 @@ export function isConcurrentOutputMode(value: unknown): value is ConcurrentOutpu
 }
 
 export function isConcurrentCompositeLayout(value: unknown): value is ConcurrentCompositeLayout {
-  return value === 'split-horizontal' || value === 'split-vertical' || value === 'stack';
+  return value === 'pip' || value === 'split-horizontal' || value === 'split-vertical' || value === 'stack';
 }
 
 export function isConcurrentPipLayoutConfig(value: unknown): value is ConcurrentPipLayoutConfig {
