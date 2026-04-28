@@ -130,7 +130,7 @@ export const { DualViewMedia } = NativeModules as {
       mirror: boolean,
       rotateLandscapeFallback: boolean,
     ): Promise<string>;
-    createWatermarkedCover?(
+    createWatermarkedPhoto?(
       sourcePath: string,
       suffix: string,
       title: string,
@@ -138,6 +138,7 @@ export const { DualViewMedia } = NativeModules as {
       infoText: string,
       templateId: CoverTemplateId,
     ): Promise<string>;
+    copyExifLocationToUri?(sourcePath: string, targetUri: string): Promise<boolean>;
     deleteMedia?(uri: string): Promise<boolean>;
     shareMedia?(uri: string, mimeType: string, title: string): Promise<boolean>;
   };

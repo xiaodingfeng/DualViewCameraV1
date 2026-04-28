@@ -36,7 +36,7 @@ export type VideoCodecFormat = 'h265' | 'h264';
 export type SafetyOverlayMode = 'off' | 'subtle' | 'strong';
 export type PipAnchor = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 export type PipScale = 'small' | 'medium' | 'large';
-export type PreviewLayoutTemplateId = 'pip' | 'split-horizontal' | 'split-vertical' | 'stack';
+export type PreviewLayoutTemplateId = 'pip';
 export type PipLayoutConfig = {
   anchor: PipAnchor;
   scale: PipScale;

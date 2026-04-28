@@ -73,18 +73,23 @@ export function isPipScale(value: unknown): value is PipScale {
 }
 
 export function isPreviewLayoutTemplateId(value: unknown): value is PreviewLayoutTemplateId {
-  return value === 'pip' || value === 'split-horizontal' || value === 'split-vertical' || value === 'stack';
+  return value === 'pip';
 }
 
 export function isCoverTemplateId(value: unknown): value is CoverTemplateId {
-  return value === 'none' || value === 'clean-date' || value === 'dual-card' || value === 'vlog-title';
+  return value === 'none' || value === 'watermark';
 }
 
 export function isCoverTemplateSettings(value: unknown): value is CoverTemplateSettings {
   if (value == null || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
+  const legacyTemplateEnabled =
+    candidate.templateId === 'clean-date' ||
+    candidate.templateId === 'dual-card' ||
+    candidate.templateId === 'vlog-title';
   return (
-    isCoverTemplateId(candidate.templateId) &&
+    (isCoverTemplateId(candidate.templateId) || legacyTemplateEnabled) &&
+    (typeof candidate.titleWatermarkEnabled === 'boolean' || legacyTemplateEnabled || candidate.templateId === 'none') &&
     typeof candidate.dateWatermarkEnabled === 'boolean' &&
     typeof candidate.infoWatermarkEnabled === 'boolean' &&
     typeof candidate.title === 'string' &&

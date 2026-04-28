@@ -20,8 +20,8 @@
     "react-native-safe-area-context": "^5.7.0",
     "react-native-svg": "^15.15.4",
     "react-native-svg-transformer": "^1.5.3",
-    "react-native-vision-camera": "5.0.1",
-    "react-native-vision-camera-location": "^5.0.6"
+    "react-native-vision-camera": "5.0.7",
+    "react-native-vision-camera-location": "^5.0.7"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

@@ -16,31 +16,39 @@ function formatCoverDate(timestamp: number): string {
   return `${y}.${m}.${d}`;
 }
 
-export async function createCoverForPhoto(input: {
+export function hasPhotoWatermark(settings: CoverTemplateSettings): boolean {
+  return (
+    settings.templateId === 'watermark' &&
+    (settings.titleWatermarkEnabled || settings.dateWatermarkEnabled || settings.infoWatermarkEnabled)
+  );
+}
+
+export async function createWatermarkedPhoto(input: {
   sourcePath: string;
   settings: CoverTemplateSettings;
   title: string;
   infoText: string;
   createdAt: number;
 }): Promise<string | null> {
-  if (input.settings.templateId === 'none') return null;
+  if (!hasPhotoWatermark(input.settings)) return null;
 
   const dateText = input.settings.dateWatermarkEnabled ? formatCoverDate(input.createdAt) : '';
+  const titleText = input.settings.titleWatermarkEnabled ? input.title : '';
   const infoText = input.settings.infoWatermarkEnabled ? input.infoText : '';
   const sourcePath = toLocalPath(input.sourcePath);
 
-  if (DualViewMedia?.createWatermarkedCover) {
-    return DualViewMedia.createWatermarkedCover(
+  if (DualViewMedia?.createWatermarkedPhoto) {
+    return DualViewMedia.createWatermarkedPhoto(
       sourcePath,
-      slugify(input.title || 'cover'),
-      input.title,
+      slugify(input.title || 'watermark'),
+      titleText,
       dateText,
       infoText,
-      input.settings.templateId,
+      'watermark',
     );
   }
 
-  const target = `${RNFS.CachesDirectoryPath}/DualViewCamera_cover_${Date.now()}.jpg`;
+  const target = `${RNFS.CachesDirectoryPath}/DualViewCamera_watermark_${Date.now()}.jpg`;
   await RNFS.copyFile(sourcePath, target);
   return target;
 }

@@ -18,7 +18,7 @@ import {
   CommonResolutions,
   type CameraDevice,
   type CameraPosition,
-  type Orientation,
+  type CameraOrientation,
   type PreviewView,
   type Recorder,
   useCamera,
@@ -39,7 +39,6 @@ import {
   MainPreview,
   PipPreview,
   PreviewStatusOverlay,
-  TemplateDualPreview,
   Toast,
   TopBar,
   ZoomSelector,
@@ -60,8 +59,9 @@ const DEFAULT_PIP_LAYOUT: PipLayoutConfig = {
 const DEFAULT_PREVIEW_LAYOUT_TEMPLATE: PreviewLayoutTemplateId = 'pip';
 const DEFAULT_COVER_TEMPLATE: CoverTemplateSettings = {
   templateId: 'none',
-  dateWatermarkEnabled: true,
-  infoWatermarkEnabled: true,
+  titleWatermarkEnabled: false,
+  dateWatermarkEnabled: false,
+  infoWatermarkEnabled: false,
   title: 'Dual View',
 };
 const CAPTURE_LOCATION_OPTIONS = {
@@ -103,7 +103,7 @@ import {
 } from '../utils/cameraCapabilities';
 import { createCaptureId } from '../utils/captureId';
 import { buildCompositionScene } from '../utils/composition';
-import { createCoverForPhoto } from '../utils/coverGenerator';
+import { createWatermarkedPhoto, hasPhotoWatermark } from '../utils/coverGenerator';
 import {
   cameraRollNodeToGalleryMedia,
   createDualPhotoVariantsForAspects,
@@ -448,7 +448,19 @@ function CameraShell({
           if (isPreviewLayoutTemplateId(settings.previewLayoutTemplate)) {
             setPreviewLayoutTemplate(settings.previewLayoutTemplate);
           }
-          if (isCoverTemplateSettings(settings.coverTemplate)) setCoverTemplate(settings.coverTemplate);
+          if (isCoverTemplateSettings(settings.coverTemplate)) {
+            const legacyTemplateEnabled =
+              settings.coverTemplate.templateId !== 'none' &&
+              settings.coverTemplate.templateId !== 'watermark';
+            setCoverTemplate({
+              templateId: legacyTemplateEnabled ? 'watermark' : settings.coverTemplate.templateId,
+              titleWatermarkEnabled:
+                settings.coverTemplate.titleWatermarkEnabled ?? legacyTemplateEnabled,
+              dateWatermarkEnabled: settings.coverTemplate.dateWatermarkEnabled,
+              infoWatermarkEnabled: settings.coverTemplate.infoWatermarkEnabled,
+              title: settings.coverTemplate.title,
+            });
+          }
         })
         .finally(() => {
           if (!cancelled) setSettingsLoaded(true);
@@ -542,7 +554,7 @@ function CameraShell({
 
   const isDeviceLandscape = physicalOrientation === 'left' || physicalOrientation === 'right';
   const shouldMirrorSavedPhoto = cameraPosition === 'front';
-  const captureOutputOrientation: Orientation | null = physicalOrientation ?? null;
+  const captureOutputOrientation: CameraOrientation | null = physicalOrientation ?? null;
   const fullMainAspect =
       previewSize.width > 0 && previewSize.height > 0
           ? previewSize.width / Math.max(1, previewSize.height)
@@ -954,6 +966,9 @@ function CameraShell({
         const sourcePath = type === 'video' ? await ensureVideoExtension(filePath, label) : filePath;
         const uri = toFileUri(sourcePath);
         const saved = await CameraRoll.saveAsset(uri, { type, album: 'DualViewCamera' });
+        if (type === 'photo' && DualViewMedia?.copyExifLocationToUri) {
+          await DualViewMedia.copyExifLocationToUri(sourcePath, saved.node.image.uri).catch(() => false);
+        }
         setLastMedia(mediaToLastMedia(cameraRollNodeToGalleryMedia(saved)));
         refreshGallery().catch(() => {});
         return {
@@ -983,44 +998,29 @@ function CameraShell({
       [saveDualOutputs, viewMode],
   );
 
-  const createAndSaveCoverAsset = useCallback(
+  const createWatermarkedMainPhoto = useCallback(
       async (input: {
-        captureId: string;
         createdAt: number;
         dual: boolean;
         mainLocalPath: string;
-        sourceUri: string;
-      }): Promise<DualMediaAsset | null> => {
-        if (coverTemplate.templateId === 'none') return null;
+      }): Promise<string> => {
+        if (!hasPhotoWatermark(coverTemplate)) return input.mainLocalPath;
         try {
           const coverTitle = coverTemplate.title.trim() || (input.dual ? 'Dual View' : 'Agile');
-          const coverPath = await createCoverForPhoto({
+          const watermarkedPath = await createWatermarkedPhoto({
             sourcePath: input.mainLocalPath,
             settings: coverTemplate,
             title: coverTitle,
             infoText: `${selectedAspectId} ${input.dual ? 'Dual' : 'Single'}`,
             createdAt: input.createdAt,
           });
-          if (coverPath == null) return null;
-          const coverSaved = await saveToGallery(coverPath, 'photo', '封面');
-          return buildReadyAsset({
-            captureId: input.captureId,
-            createdAt: input.createdAt,
-            type: 'cover',
-            role: 'cover',
-            aspect: '16:9',
-            uri: coverSaved.uri,
-            localPath: coverSaved.localPath,
-          sourceUri: input.sourceUri,
-          templateId: coverTemplate.templateId,
-          title: coverTitle,
-        });
+          return watermarkedPath ?? input.mainLocalPath;
         } catch (error) {
           setToast(cameraErrorMessage(error, '封面生成失败'));
-          return null;
+          return input.mainLocalPath;
         }
       },
-      [coverTemplate, saveToGallery, selectedAspectId, setToast],
+      [coverTemplate, selectedAspectId, setToast],
   );
 
   const saveCapturedPhotoInBackground = useCallback(
@@ -1067,7 +1067,7 @@ function CameraShell({
             await runQueuedMediaJob(async () => {
               await applyJobPatch({ status: 'running', progress: 0.08 });
               if (options.dual) {
-              const { mainPath, subPath } = await createDualPhotoVariantsForAspects(
+              let { mainPath, subPath } = await createDualPhotoVariantsForAspects(
                   filePath,
                   options.mainSpec,
                   options.subSpec,
@@ -1077,18 +1077,16 @@ function CameraShell({
                   options.rotateLandscapeFallback,
               );
               await applyJobPatch({ status: 'running', progress: 0.45 });
+              mainPath = await createWatermarkedMainPhoto({
+                createdAt,
+                dual: true,
+                mainLocalPath: mainPath,
+              });
 
               const [mainSaved, subSaved] = await Promise.all([
                 saveToGallery(mainPath, 'photo', '主画面'),
                 saveToGallery(subPath, 'photo', '副画面'),
               ]);
-              const coverAsset = await createAndSaveCoverAsset({
-                captureId,
-                createdAt,
-                dual: true,
-                mainLocalPath: mainSaved.localPath ?? mainPath,
-                sourceUri: filePath,
-              });
               await applyJobPatch({ status: 'running', progress: 0.78 });
               await saveCaptureGroupToIndex({
                 captureId,
@@ -1114,7 +1112,6 @@ function CameraShell({
                     localPath: subSaved.localPath,
                     sourceUri: filePath,
                   }),
-                  ...(coverAsset ? [coverAsset] : []),
                 ],
               });
               await applyJobPatch({
@@ -1126,7 +1123,7 @@ function CameraShell({
                 },
               });
             } else {
-              const mainPath = await createPhotoVariantForAspect(
+              let mainPath = await createPhotoVariantForAspect(
                   filePath,
                   options.mainSpec,
                   'main',
@@ -1136,15 +1133,13 @@ function CameraShell({
                   options.rotateLandscapeFallback.main,
               );
               await applyJobPatch({ status: 'running', progress: 0.55 });
-              await applyJobPatch({ status: 'running', progress: 0.82 });
-              const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
-              const coverAsset = await createAndSaveCoverAsset({
-                captureId,
+              mainPath = await createWatermarkedMainPhoto({
                 createdAt,
                 dual: false,
-                mainLocalPath: mainSaved.localPath ?? mainPath,
-                sourceUri: filePath,
+                mainLocalPath: mainPath,
               });
+              await applyJobPatch({ status: 'running', progress: 0.82 });
+              const mainSaved = await saveToGallery(mainPath, 'photo', '主画面');
               await saveCaptureGroupToIndex({
                 captureId,
                 createdAt,
@@ -1159,7 +1154,6 @@ function CameraShell({
                     localPath: mainSaved.localPath,
                     sourceUri: filePath,
                   }),
-                  ...(coverAsset ? [coverAsset] : []),
                 ],
               });
               await applyJobPatch({
@@ -1197,7 +1191,13 @@ function CameraShell({
           }
         })();
       },
-      [createAndSaveCoverAsset, saveCaptureGroupToIndex, saveToGallery, selectedAspectId, setMediaJobs],
+      [
+        createWatermarkedMainPhoto,
+        saveCaptureGroupToIndex,
+        saveToGallery,
+        selectedAspectId,
+        setMediaJobs,
+      ],
   );
 
   const prepareFlashForPhoto = useCallback(async () => {
@@ -1857,28 +1857,7 @@ function CameraShell({
                 lastPinchDist.current = null;
               }}
           >
-            {viewMode === 'dual' && previewLayoutTemplate !== 'pip' ? (
-                <TemplateDualPreview
-                    layoutId={previewLayoutTemplate}
-                    mainCropSpec={mainFrameSpec}
-                    mainHybridRef={previewHybridRef}
-                    mainPreviewOutput={mainPreviewOutput}
-                    overlayMode={safetyOverlayMode}
-                    subCropSpec={subFrameSpec}
-                    subPreviewOutput={
-                      captureMode === 'photo'
-                          ? pendingPhotoCapture
-                              ? null
-                              : pipPreviewOutput
-                          : isVideoSessionTarget
-                              ? null
-                              : pipPreviewOutput
-                    }
-                    isRecording={isRecording}
-                    sessionRevision={sessionRevision}
-                />
-            ) : (
-                <MainPreview
+            <MainPreview
                     hybridRef={previewHybridRef}
                     cropSpec={mainFrameSpec}
                     orientation={mainDisplayOrientation}
@@ -1896,7 +1875,6 @@ function CameraShell({
                         isSwitching
                     }
                 />
-            )}
 
             <Pressable style={styles.focusLayer} onPress={focusAtPoint} />
             {focusPoint && <FocusBox point={focusPoint} />}
@@ -2014,8 +1992,6 @@ function CameraShell({
             onSafetyOverlayModeChange={setSafetyOverlayMode}
             coverTemplate={coverTemplate}
             onCoverTemplateChange={setCoverTemplate}
-            previewLayoutTemplate={previewLayoutTemplate}
-            onPreviewLayoutTemplateChange={setPreviewLayoutTemplate}
             setSaveDualOutputs={setSaveDualOutputs}
             shutterSoundEnabled={shutterSoundEnabled}
             onShutterSoundEnabledChange={setShutterSoundEnabled}

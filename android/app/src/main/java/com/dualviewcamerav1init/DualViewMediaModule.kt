@@ -137,6 +137,45 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun copyExifLocationToUri(sourcePath: String, targetUriString: String, promise: Promise) {
+    try {
+      val source = File(sourcePath.removePrefix("file://"))
+      if (!source.exists()) {
+        promise.resolve(false)
+        return
+      }
+      val latLong = ExifInterface(source.absolutePath).latLong
+      if (latLong == null) {
+        promise.resolve(false)
+        return
+      }
+
+      val targetUri = Uri.parse(targetUriString)
+      if (targetUri.scheme == "file" || targetUri.scheme.isNullOrBlank()) {
+        val targetPath = targetUri.path ?: targetUriString.removePrefix("file://")
+        ExifInterface(targetPath).apply {
+          setLatLong(latLong[0], latLong[1])
+          saveAttributes()
+        }
+        promise.resolve(true)
+        return
+      }
+
+      reactContext.contentResolver.openFileDescriptor(targetUri, "rw")?.use { descriptor ->
+        ExifInterface(descriptor.fileDescriptor).apply {
+          setLatLong(latLong[0], latLong[1])
+          saveAttributes()
+        }
+        promise.resolve(true)
+        return
+      }
+      promise.resolve(false)
+    } catch (error: Throwable) {
+      promise.reject("EEXIF", error.message, error)
+    }
+  }
+
+  @ReactMethod
   fun createPhotoVariant(sourcePath: String, variant: String, suffix: String, promise: Promise) {
     createPhotoVariantInternal(sourcePath, photoAspectForVariant(variant), safeVariant(variant), suffix, "jpeg", 94, promise)
   }
@@ -343,7 +382,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun createWatermarkedCover(
+  fun createWatermarkedPhoto(
       sourcePath: String,
       suffix: String,
       title: String,
@@ -355,21 +394,21 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     try {
       val source = File(sourcePath.removePrefix("file://"))
       if (!source.exists()) {
-        promise.reject("ENOENT", "Source cover photo does not exist: ${source.absolutePath}")
+        promise.reject("ENOENT", "Source photo does not exist: ${source.absolutePath}")
         return
       }
 
       val decoded = BitmapFactory.decodeFile(source.absolutePath)
       if (decoded == null) {
-        promise.reject("EDECODE", "Unable to decode source cover photo: ${source.absolutePath}")
+        promise.reject("EDECODE", "Unable to decode source photo: ${source.absolutePath}")
         return
       }
 
       val upright = applyExifOrientation(decoded, source.absolutePath)
-      val cover = drawCoverBitmap(upright, title, dateText, infoText, templateId)
+      val cover = drawWatermarkedBitmap(upright, title, dateText, infoText, templateId)
       val target = File(
           reactContext.cacheDir,
-          "DualViewCamera_cover_${safeSuffix(suffix)}_${safeSuffix(templateId)}_${System.currentTimeMillis()}.jpg"
+          "DualViewCamera_watermark_${safeSuffix(suffix)}_${safeSuffix(templateId)}_${System.currentTimeMillis()}.jpg"
       )
       FileOutputStream(target).use { output ->
         cover.compress(Bitmap.CompressFormat.JPEG, 94, output)
@@ -382,7 +421,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
       promise.resolve(target.absolutePath)
     } catch (error: Throwable) {
-      promise.reject("ECOVER", error.message, error)
+      promise.reject("EWATERMARK", error.message, error)
     }
   }
 
@@ -414,7 +453,8 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
 
   private fun writePhotoVariant(source: Bitmap, targetAspect: Double, variantLabel: String, suffix: String, format: String, quality: Int = 94, mirror: Boolean = false, rotateLandscapeFallback: Boolean = false, sourceLocationPath: String? = null): File {
     val oriented = orientBitmapForTargetAspect(source, targetAspect, rotateLandscapeFallback)
-    val cropped = centerCrop(oriented, targetAspect)
+    val frontCorrected = if (mirror) rotateBitmap180(oriented) else oriented
+    val cropped = centerCrop(frontCorrected, targetAspect)
     val outputBitmap = if (mirror) mirrorBitmap(cropped) else cropped
     val useHeif = shouldWriteHeif(format)
     val target = File(
@@ -430,6 +470,7 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     }
     if (outputBitmap !== cropped) outputBitmap.recycle()
     if (oriented !== cropped) cropped.recycle()
+    if (frontCorrected !== oriented && frontCorrected !== cropped) frontCorrected.recycle()
     if (oriented !== source && oriented !== cropped) oriented.recycle()
     copyExifLocation(sourceLocationPath, target.absolutePath)
     return target
@@ -703,60 +744,55 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
     return Bitmap.createBitmap(source, left, top, cropWidth, cropHeight)
   }
 
-  private fun drawCoverBitmap(
+  private fun drawWatermarkedBitmap(
       source: Bitmap,
       title: String,
       dateText: String,
       infoText: String,
       templateId: String
   ): Bitmap {
-    val width = 1280
-    val height = 720
+    val width = source.width
+    val height = source.height
     val target = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(target)
     val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    val cropped = centerCrop(source, width.toDouble() / height.toDouble())
 
-    canvas.drawColor(Color.rgb(8, 10, 12))
-    canvas.drawBitmap(cropped, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), bitmapPaint)
+    canvas.drawBitmap(source, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), bitmapPaint)
 
     val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = when (templateId) {
-        "vlog-title" -> Color.rgb(255, 209, 102)
-        "dual-card" -> Color.rgb(122, 162, 255)
-        else -> Color.WHITE
-      }
-      strokeWidth = 6f
+      color = Color.rgb(255, 209, 102)
+      strokeWidth = (width * 0.0047f).coerceAtLeast(3f)
     }
-    canvas.drawLine(54f, height - 154f, 150f, height - 154f, accentPaint)
+    val margin = (width * 0.042f).coerceAtLeast(28f)
+    val baseline = height - margin
+    canvas.drawLine(margin, baseline - (height * 0.14f), margin + (width * 0.075f), baseline - (height * 0.14f), accentPaint)
 
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.WHITE
-      textSize = 56f
+      textSize = (width * 0.044f).coerceAtLeast(34f)
       typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
       setShadowLayer(8f, 0f, 3f, Color.argb(180, 0, 0, 0))
     }
     val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.argb(220, 255, 255, 255)
-      textSize = 28f
+      textSize = (width * 0.022f).coerceAtLeast(18f)
       typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
       setShadowLayer(6f, 0f, 2f, Color.argb(180, 0, 0, 0))
     }
 
-    val displayTitle = title.ifBlank {
-      if (templateId == "vlog-title") "VLOG" else "Dual View"
+    val displayTitle = title.ifBlank { "" }
+    if (displayTitle.isNotBlank()) {
+      canvas.drawText(displayTitle.take(28), margin, baseline - (height * 0.085f), titlePaint)
     }
-    canvas.drawText(displayTitle.take(28), 54f, height - 96f, titlePaint)
     if (dateText.isNotBlank()) {
-      canvas.drawText(dateText.take(24), 54f, height - 48f, metaPaint)
+      canvas.drawText(dateText.take(24), margin, baseline, metaPaint)
     }
     if (infoText.isNotBlank()) {
       val displayInfo = infoText.take(32)
       val textWidth = metaPaint.measureText(displayInfo)
-      canvas.drawText(displayInfo, width - textWidth - 54f, height - 48f, metaPaint)
+      canvas.drawText(displayInfo, width - textWidth - margin, baseline, metaPaint)
     }
 
-    if (cropped !== source) cropped.recycle()
     return target
   }
 
@@ -774,6 +810,13 @@ class DualViewMediaModule(private val reactContext: ReactApplicationContext) :
   private fun mirrorBitmap(source: Bitmap): Bitmap {
     val matrix = Matrix().apply {
       preScale(-1f, 1f)
+    }
+    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+  }
+
+  private fun rotateBitmap180(source: Bitmap): Bitmap {
+    val matrix = Matrix().apply {
+      postRotate(180f)
     }
     return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
   }

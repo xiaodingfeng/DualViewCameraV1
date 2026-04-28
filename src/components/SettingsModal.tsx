@@ -9,14 +9,12 @@ import {
   VIDEO_CODEC_CONFIG,
   VIDEO_QUALITY_CONFIG,
 } from '../config/camera';
-import { COVER_TEMPLATE_IDS, COVER_TEMPLATE_LABELS } from '../config/coverTemplates';
 import { styles } from '../styles/cameraStyles';
 import type { CoverTemplateSettings } from '../types/coverTemplate';
 import type {
   FlashMode,
   PhotoFormat,
   PhotoQuality,
-  PreviewLayoutTemplateId,
   SafetyOverlayMode,
   VideoCodecFormat,
   VideoFps,
@@ -45,8 +43,6 @@ function SettingsModal({
   saveDualOutputs,
   safetyOverlayMode,
   onSafetyOverlayModeChange,
-  previewLayoutTemplate,
-  onPreviewLayoutTemplateChange,
   setSaveDualOutputs,
   shutterSoundEnabled,
   onShutterSoundEnabledChange,
@@ -75,8 +71,6 @@ function SettingsModal({
   saveDualOutputs: boolean;
   safetyOverlayMode: SafetyOverlayMode;
   onSafetyOverlayModeChange: (value: SafetyOverlayMode) => void;
-  previewLayoutTemplate: PreviewLayoutTemplateId;
-  onPreviewLayoutTemplateChange: (value: PreviewLayoutTemplateId) => void;
   setSaveDualOutputs: (value: boolean) => void;
   shutterSoundEnabled: boolean;
   onShutterSoundEnabledChange: (value: boolean) => void;
@@ -187,20 +181,25 @@ function SettingsModal({
                     <Chip key={value} active={safetyOverlayMode === value} label={SAFETY_OVERLAY_LABELS[value]} onPress={() => onSafetyOverlayModeChange(value)} />
                   ))}
                 </SettingsSection>
-                <SettingsSection title="封面水印">
-                  <TextInput
-                    maxLength={28}
-                    onChangeText={text => onCoverTemplateChange({ ...coverTemplate, title: text })}
-                    placeholder="封面标题"
-                    placeholderTextColor={COLORS.muted}
-                    style={styles.settingsTextInput}
-                    value={coverTemplate.title}
+                <SettingsSection title="照片水印">
+                  {coverTemplate.titleWatermarkEnabled ? (
+                    <TextInput
+                      maxLength={28}
+                      onChangeText={text => onCoverTemplateChange({ ...coverTemplate, title: text })}
+                      placeholder="Vlog 标题"
+                      placeholderTextColor={COLORS.muted}
+                      style={styles.settingsTextInput}
+                      value={coverTemplate.title}
+                    />
+                  ) : null}
+                  <Chip active={coverTemplate.titleWatermarkEnabled} label="Vlog 标题" onPress={() => onCoverTemplateChange({ ...coverTemplate, templateId: 'watermark', titleWatermarkEnabled: !coverTemplate.titleWatermarkEnabled })} />
+                  <Chip active={coverTemplate.dateWatermarkEnabled} label="拍摄日期" onPress={() => onCoverTemplateChange({ ...coverTemplate, templateId: 'watermark', dateWatermarkEnabled: !coverTemplate.dateWatermarkEnabled })} />
+                  <Chip active={coverTemplate.infoWatermarkEnabled} label="拍摄参数" onPress={() => onCoverTemplateChange({ ...coverTemplate, templateId: 'watermark', infoWatermarkEnabled: !coverTemplate.infoWatermarkEnabled })} />
+                  <Chip
+                    active={!coverTemplate.titleWatermarkEnabled && !coverTemplate.dateWatermarkEnabled && !coverTemplate.infoWatermarkEnabled}
+                    label="无水印"
+                    onPress={() => onCoverTemplateChange({ ...coverTemplate, templateId: 'none', titleWatermarkEnabled: false, dateWatermarkEnabled: false, infoWatermarkEnabled: false })}
                   />
-                  {COVER_TEMPLATE_IDS.map(value => (
-                    <Chip key={value} active={coverTemplate.templateId === value} label={COVER_TEMPLATE_LABELS[value]} onPress={() => onCoverTemplateChange({ ...coverTemplate, templateId: value })} />
-                  ))}
-                  <Chip active={coverTemplate.dateWatermarkEnabled} label="日期水印" onPress={() => onCoverTemplateChange({ ...coverTemplate, dateWatermarkEnabled: !coverTemplate.dateWatermarkEnabled })} />
-                  <Chip active={coverTemplate.infoWatermarkEnabled} label="参数水印" onPress={() => onCoverTemplateChange({ ...coverTemplate, infoWatermarkEnabled: !coverTemplate.infoWatermarkEnabled })} />
                 </SettingsSection>
               </>
             ) : tab === 'video' ? (
@@ -254,14 +253,6 @@ function SettingsModal({
               <SettingsSection title="双画面">
                 <Chip active={viewMode === 'dual'} label="双画面预览已开启" />
                 <Chip active={saveDualOutputs} label="双画面同时保存" onPress={() => setSaveDualOutputs(!saveDualOutputs)} />
-                {PREVIEW_LAYOUT_TEMPLATES.map(item => (
-                  <Chip
-                    key={item.id}
-                    active={previewLayoutTemplate === item.id}
-                    label={item.label}
-                    onPress={() => onPreviewLayoutTemplateChange(item.id)}
-                  />
-                ))}
               </SettingsSection>
             )}
             
@@ -313,13 +304,6 @@ const SAFETY_OVERLAY_LABELS: Record<SafetyOverlayMode, string> = {
   subtle: '轻量',
   strong: '明显',
 };
-
-const PREVIEW_LAYOUT_TEMPLATES: Array<{ id: PreviewLayoutTemplateId; label: string }> = [
-  { id: 'pip', label: '画中画' },
-  { id: 'split-horizontal', label: '左右分屏' },
-  { id: 'split-vertical', label: '上下分屏' },
-  { id: 'stack', label: '主图+副条' },
-];
 
 function RoundButton({ active = false, label, onPress, style, children }: { active?: boolean; label: string; onPress: () => void; style?: any; children?: React.ReactNode }) {
   return <Pressable style={[styles.roundButton, active && styles.roundButtonActive, style]} onPress={onPress}>{children ? children : <Text style={styles.roundButtonText}>{label}</Text>}</Pressable>;
